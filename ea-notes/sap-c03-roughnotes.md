@@ -28,6 +28,7 @@ Amazon Kinesis Data Streams, AWS Glue, Amazon Athena, AWS Lambda).
 ##### Skill 1.1.4: 
 Design multi-step workflows that have durable execution patterns (for example, by
 using AWS Step Functions, durable Lambda functions).
+
 ##### Skill 1.1.5: 
 Implement cross-account and cross-Region event routing patterns that use event
 buses and event forwarding.

@@ -10,15 +10,44 @@ This task tests whether you can pick the right managed building block for each p
 
 **Key concepts**
 
-- Almost every AWS messaging service delivers at least once. Design every consumer to be idempotent, whatever service sits in front of it. A common way to do this is a conditional write (`attribute_not_exists`) to a DynamoDB table keyed on the event or business ID, with TTL to expire old keys. Powertools for AWS Lambda has an idempotency utility built on this pattern.
-- **SQS standard:** close to unlimited throughput, at-least-once delivery, best-effort ordering. Use it when order does not matter and consumers are idempotent.
-- **SQS FIFO:** ordering is strict only *within a message group ID*. Deduplication (content-based or by `MessageDeduplicationId`) works inside a 5-minute window. Throughput is 300 messages per second per API action without batching and 3,000 with batching. High-throughput mode raises this a lot, provided you spread load across many message groups. One hot group ID serialises processing, because only one in-flight batch per group can be consumed at a time.
-- **SNS:** push-based fan-out. SNS FIFO topics keep order and deduplicate, and they fan out to SQS FIFO queues. Subscription filter policies let each subscriber receive only part of the stream, with no consumer code.
-- **EventBridge:** content-based routing on the full event JSON. It offers schema discovery, archive and replay, scheduled rules, and API destinations for third-party HTTP targets. Delivery is at least once with **no ordering guarantee**. On failure it retries (by default for up to 24 hours) and then sends to a DLQ if you configure one per target. Choose EventBridge when routing logic and many targets matter more than order or raw throughput.
-- **EventBridge Pipes:** point-to-point from a source (SQS, Kinesis, DynamoDB Streams, MSK, and others) to a target, with optional filtering, enrichment and transformation. It replaces "glue" Lambda functions.
-- **Kinesis Data Streams:** order is kept per shard. The partition key is hashed to a shard, so all records for one key stay in order. Each shard takes 1 MB/s or 1,000 records/s on write. Readers share 2 MB/s per shard, or get 2 MB/s each with enhanced fan-out. Records can be replayed for the whole retention period, and many independent consumers can read the same stream. A low-cardinality partition key creates hot shards.
+- Almost every AWS messaging service delivers at least once. Design every consumer to be idempotent, whatever service sits in front of it. 
+A common way to do this is a conditional write (`attribute_not_exists`) to a DynamoDB table keyed on the event or business ID, with TTL to expire old keys. 
+Powertools for AWS Lambda has an idempotency utility built on this pattern.
+
+- **SQS standard:** close to unlimited throughput, at-least-once delivery, best-effort ordering. 
+Use it when order does not matter and consumers are idempotent.
+
+- **SQS FIFO:** 
+ordering is strict only *within a message group ID*. 
+Deduplication (content-based or by `MessageDeduplicationId`) works inside a 5-minute window. 
+Throughput is 300 messages per second per API action without batching and 3,000 with batching. 
+High-throughput mode raises this a lot, provided you spread load across many message groups. 
+One hot group ID serialises processing, because only one in-flight batch per group can be consumed at a time.
+
+- **SNS:** 
+Push-based fan-out. 
+SNS FIFO topics keep order and deduplicate, and they fan out to SQS FIFO queues. 
+Subscription filter policies let each subscriber receive only part of the stream, with no consumer code.
+
+- **EventBridge:** 
+Content-based routing on the full event JSON. It offers schema discovery, archive and replay, scheduled rules, and API destinations for third-party HTTP targets. 
+Delivery is at least once with **no ordering guarantee**. 
+On failure it retries (by default for up to 24 hours) and then sends to a DLQ if you configure one per target. Choose EventBridge when routing logic and many targets matter more than order or raw throughput.
+
+- **EventBridge Pipes:** 
+point-to-point from a source (SQS, Kinesis, DynamoDB Streams, MSK, and others) to a target, with optional filtering, enrichment and transformation. It replaces "glue" Lambda functions.
+
+- **Kinesis Data Streams:** 
+Order is kept per shard. 
+The partition key is hashed to a shard, so all records for one key stay in order. 
+Each shard takes 1 MB/s or 1,000 records/s on write. 
+Readers share 2 MB/s per shard, or get 2 MB/s each with enhanced fan-out. 
+Records can be replayed for the whole retention period, and many independent consumers can read the same stream. 
+A low-cardinality partition key creates hot shards.
+
 - Decision rule:
-  - Strict per-entity order plus deduplication at moderate rate: SQS FIFO with entity ID as the group ID (SNS FIFO in front if you need fan-out).
+  - Strict per-entity order plus deduplication at moderate rate: 
+  SQS FIFO with entity ID as the group ID (SNS FIFO in front if you need fan-out).
   - Ordered high-volume stream with replay and several consumers: Kinesis with the entity ID as the partition key.
   - Routing by content to many targets, including other accounts: EventBridge.
 - With Lambda event source mappings:
@@ -52,17 +81,30 @@ This task tests whether you can pick the right managed building block for each p
 **Key concepts**
 
 - Keep compute disposable. Store session, workflow and cache state outside the instance, task or function, so that scaling in, Spot interruption, or a deployment loses nothing.
-- **DynamoDB:** the default store for session and entity state that must be durable. Expect single-digit-millisecond reads at any scale. TTL deletes expired sessions for free, and conditional writes and transactions give you optimistic locking. Items are limited to 400 KB, so large blobs go to S3 with a pointer in DynamoDB.
-- **ElastiCache (Valkey, Redis OSS, Memcached):** sub-millisecond access for hot session data, rate-limit counters, leaderboards and pub/sub. ElastiCache Serverless removes node sizing. Use Valkey or Redis OSS with replication and Multi-AZ when losing the cache would hurt users. Use Memcached only for a simple, multi-threaded, non-persistent cache.
-- **S3:** large objects, documents and checkpoints. It has strong read-after-write consistency for all operations. Conditional writes (`If-None-Match`) let you prevent overwriting an object that already exists, which is useful for idempotent writers.
+
+- **DynamoDB:** 
+the default store for session and entity state that must be durable. 
+Expect single-digit-millisecond reads at any scale. 
+TTL deletes expired sessions for free, and conditional writes and transactions give you optimistic locking. 
+Items are limited to 400 KB, so large blobs go to S3 with a pointer in DynamoDB.
+
+- **ElastiCache (Valkey, Redis OSS, Memcached):** 
+sub-millisecond access for hot session data, rate-limit counters, leaderboards and pub/sub. 
+ElastiCache Serverless removes node sizing. Use Valkey or Redis OSS with replication and Multi-AZ when losing the cache would hurt users. Use Memcached only for a simple, multi-threaded, non-persistent cache.
+
+- **S3:** 
+large objects, documents and checkpoints. It has strong read-after-write consistency for all operations. Conditional writes (`If-None-Match`) let you prevent overwriting an object that already exists, which is useful for idempotent writers.
 - ALB sticky sessions are a smell in a "stateless" scenario. They pin users to a target, cause uneven load, and lose sessions when the target is replaced. They are the right answer only when you cannot change a legacy application.
 - For Lambda, anything held in `/tmp` or global variables is only an optimisation inside one execution environment. Never rely on it for correctness.
 - DynamoDB Accelerator (DAX) caches DynamoDB reads with an API-compatible client. It is eventually consistent for cached reads. Choose ElastiCache for general-purpose caching and DAX for read-heavy DynamoDB without changing your data access code much.
 
 **Exam traps**
 
-- "Store sessions on an EFS mount shared by all instances." This works, but it adds latency and gives no TTL or atomic counters. DynamoDB or ElastiCache is the expected answer.
+- "Store sessions on an EFS mount shared by all instances." 
+This works, but it adds latency and gives no TTL or atomic counters. DynamoDB or ElastiCache is the expected answer.
+
 - Choosing ElastiCache as the *only* store for state that must survive a failure, such as a shopping cart or workflow position. A cache is not a system of record unless the scenario accepts losing it.
+
 - Enabling sticky sessions to fix lost sessions after Auto Scaling scale-in. The real fix is to externalise the session.
 
 **Hands-on**
@@ -73,24 +115,40 @@ This task tests whether you can pick the right managed building block for each p
    - Call it repeatedly, then publish a new version, then invoke again. The session survives because state is not in the function.
 
    *Cost/cleanup:* free tier. Delete the table and function.
+
 2. **ElastiCache Serverless counter.**
    - Create an ElastiCache Serverless Valkey cache in a VPC.
    - From a Lambda function in the same VPC, run `INCR` on a per-user key with `EXPIRE` to build a fixed-window rate limiter. Call it in a loop to see the limit apply.
 
-   *Cost/cleanup:* ElastiCache Serverless bills per GB-hour stored and per ECPU, and each cache has a minimum billed storage amount. Even when idle, it keeps charging every hour until you delete it. Delete the cache the same day. A VPC Lambda function needs no NAT gateway for this, so do not create one.
+   *Cost/cleanup:* 
+   ElastiCache Serverless bills per GB-hour stored and per ECPU, and each cache has a minimum billed storage amount. Even when idle, it keeps charging every hour until you delete it. 
+   Delete the cache the same day. 
+   A VPC Lambda function needs no NAT gateway for this, so do not create one.
 
 ### Skill 1.1.3: Serverless data processing and analysis pipelines
 
 **Key concepts**
 
-- **Standard pattern:** producers send to Kinesis Data Streams or straight to Amazon Data Firehose. Firehose then buffers, optionally transforms with Lambda, converts JSON to Parquet or ORC using a Glue Data Catalog schema, and writes partitioned objects to S3. The Glue Data Catalog holds the schema, and Athena queries it. There are no servers to manage at any stage.
+- **Standard pattern:** 
+Producers send to Kinesis Data Streams or straight to Amazon Data Firehose. 
+Firehose then buffers, optionally transforms with Lambda, converts JSON to Parquet or ORC using a Glue Data Catalog schema, and writes partitioned objects to S3. 
+The Glue Data Catalog holds the schema, and Athena queries it. 
+There are no servers to manage at any stage.
+
 - **Kinesis Data Streams vs Firehose:**
   - Kinesis Data Streams gives custom consumers, ordering, replay and sub-second latency.
   - Firehose is fully managed delivery to S3, Redshift, OpenSearch, Splunk, HTTP endpoints and others. It buffers by size or time (seconds to minutes) and has no replay.
   - If the scenario says "near real time into S3 with no code", choose Firehose.
-- **AWS Glue:** serverless Spark or Python shell ETL jobs, crawlers to infer schemas, job bookmarks for incremental processing, and Glue Data Quality rules. Glue streaming jobs can read from Kinesis or Kafka.
-- **Athena:** pay per data scanned. Cost and speed depend on columnar formats (Parquet or ORC), compression, partitioning and partition projection. Partition projection avoids crawling and managing very large numbers of partitions. Use workgroups for per-team query limits and result locations.
-- **Lambda in pipelines:** good for light per-record transforms, enrichment and fan-out. It is limited to 15 minutes and a fixed memory ceiling. For joins, large aggregations or anything over large data volumes, use Glue or EMR Serverless.
+
+- **AWS Glue:** 
+serverless Spark or Python shell ETL jobs, crawlers to infer schemas, job bookmarks for incremental processing, and Glue Data Quality rules. Glue streaming jobs can read from Kinesis or Kafka.
+
+- **Athena:** 
+pay per data scanned. Cost and speed depend on columnar formats (Parquet or ORC), compression, partitioning and partition projection. Partition projection avoids crawling and managing very large numbers of partitions. Use workgroups for per-team query limits and result locations.
+
+- **Lambda in pipelines:** 
+good for light per-record transforms, enrichment and fan-out. It is limited to 15 minutes and a fixed memory ceiling. For joins, large aggregations or anything over large data volumes, use Glue or EMR Serverless.
+
 - Step Functions Distributed Map processes millions of S3 objects in parallel by invoking Lambda per item or per batch. It replaces hand-built fan-out code.
 
 **Exam traps**
@@ -108,39 +166,53 @@ This task tests whether you can pick the right managed building block for each p
    - Send 1,000 test records with a short script. After the buffer interval, query them in Athena and compare "data scanned" with a query over a raw JSON copy.
 
    *Cost/cleanup:* a few cents. Delete the Firehose stream, S3 objects and Glue table.
+
 2. **Kinesis with Lambda and bisect-on-error.**
    - Create an on-demand Kinesis data stream and a Lambda consumer that throws an error on records containing `"bad": true`.
    - Configure bisect-on-error, maximum retry attempts of 2, and an SQS on-failure destination.
    - Put 50 records, one of them bad. Confirm the rest are processed and only the bad record's metadata lands in SQS.
 
-   *Cost/cleanup:* on-demand Kinesis bills per stream-hour plus data, so delete the stream within the hour. Delete the function and queue.
+   *Cost/cleanup:* 
+   On-demand Kinesis bills per stream-hour plus data, so delete the stream within the hour. 
+   Delete the function and queue.
 
 ### Skill 1.1.4: Multi-step workflows with durable execution (Step Functions, durable Lambda functions)
 
 **Key concepts**
 
 - **Step Functions Standard workflows:**
+
   - Up to one year per execution, with exactly-once execution of each workflow step.
   - Full execution history is visible in the console.
   - Priced per state transition.
   - Use them for long-running, auditable business processes and human approvals. The `.waitForTaskToken` callback pattern pauses until an external system returns the token.
+
 - **Step Functions Express workflows:**
   - Up to 5 minutes, priced by request and duration.
   - Asynchronous Express runs are at least once. Synchronous Express runs are at most once.
   - Use them for high-volume, short, idempotent event processing.
-- **Step Functions integrations:** more than 200 services through AWS SDK integrations, so many steps need no Lambda at all. `.sync` waits for jobs such as Glue, ECS or Batch tasks. Distributed Map gives massive parallelism. Retry and Catch are declared per state.
+
+- **Step Functions integrations:** 
+more than 200 services through AWS SDK integrations, so many steps need no Lambda at all. 
+`.sync` waits for jobs such as Glue, ECS or Batch tasks. 
+Distributed Map gives massive parallelism. Retry and Catch are declared per state.
+
 - **Lambda durable functions** (launched at re:Invent 2025):
+
   - You write the workflow as ordinary code (Python, Node.js or Java, and container images too) using the Durable Execution SDK.
   - `context.step()` checkpoints each step's result. `context.wait()` pauses without consuming compute. `context.waitForCallback()` pauses until an external system sends success or failure to the Lambda API, for example for human approval. `parallel()` and `map()` fan out work, and `invoke()` chains to another function in the same account.
   - On resume, Lambda re-runs the handler from the top and *replays* completed steps from the checkpoint log instead of re-executing them. Code outside steps must therefore be deterministic: no direct random values, clock reads or API calls.
+
 - **Durable function limits that decide answers:**
-  - Each invocation is still capped at 15 minutes. A whole durable execution can last up to one year when invoked asynchronously.
+  - Each invocation is still capped at 15 minutes. 
+  A whole durable execution can last up to one year when invoked asynchronously.
   - Synchronous invocations are capped at 15 minutes in total.
   - When an event source mapping (SQS, Kinesis, DynamoDB Streams, MSK and others) invokes a durable function, the call is synchronous. The *whole execution* must then finish within the function timeout limit (15 minutes on default capacity). For longer workflows, put a small standard Lambda function between the mapping and the durable function and have it invoke the durable function asynchronously.
   - Use the execution name parameter for idempotent starts.
   - You must invoke with a qualified ARN (version or alias). An execution is pinned to the version that started it, so new deployments do not break in-flight executions. Executions started on `$LATEST` can resume on changed code, which is unsafe in production.
   - Durable functions support DLQs but not Lambda destinations.
   - While an on-demand function is suspended you pay no duration charges. You do pay for replay invocations, durable operations and stored checkpoint data.
+
 - **Choosing between them:**
   - Choose Step Functions when you want a visual, declarative workflow, direct service integrations without code, Distributed Map at very large scale, or orchestration across many services and teams.
   - Choose durable functions when the team wants the workflow as application code inside Lambda, tested with normal unit tests, with no separate state-machine language.
@@ -160,8 +232,10 @@ This task tests whether you can pick the right managed building block for each p
    - Watch the execution resume in the console's graph view.
 
    *Cost/cleanup:* within free tier (4,000 state transitions per month). Delete the state machine, queue and function.
+
 2. **Durable function with a callback.**
-   - Create a Node.js or Python Lambda function with durable execution enabled. Use one `step` to "reserve stock", then `waitForCallback` for approval, then a final `step`.
+   - Create a Node.js or Python Lambda function with durable execution enabled. 
+   Use one `step` to "reserve stock", then `waitForCallback` for approval, then a final `step`.
    - Publish version 1 and invoke `function:1` asynchronously with an execution name.
    - Send the callback success with the CLI. Inspect the durable execution state and note that the first step did not re-run on resume.
    - Invoke again with the same execution name and observe that no duplicate execution starts.
@@ -173,14 +247,23 @@ This task tests whether you can pick the right managed building block for each p
 **Key concepts**
 
 - **Bus-to-bus pattern:** a rule on the source bus targets the ARN of another event bus. The target bus can be in another account, another Region, or both. The same-account, different-Region case is supported.
+
   - The receiving bus needs a **resource-based policy** that allows the sender: specific account IDs, or the whole organization through an `aws:PrincipalOrgID` condition.
   - The sending rule needs an **IAM role** that allows `events:PutEvents` on the target bus. A role has been mandatory for new cross-account bus targets since March 2023.
-- **Single-hop rule:** EventBridge does not forward an event a second time. If account B receives an event from account A and has a rule sending it on to account C, the event does not reach C. The same applies when chaining buses inside one account. Central aggregation designs must therefore send straight from each source to the final bus, not through regional "collector" buses.
-- **Direct cross-account targets:** within the *same Region*, a rule can deliver straight to SQS, SNS, Lambda, Kinesis Data Streams or API Gateway in another account, with no bus in the target account.
+
+- **Single-hop rule:** 
+EventBridge does not forward an event a second time. If account B receives an event from account A and has a rule sending it on to account C, the event does not reach C. The same applies when chaining buses inside one account. Central aggregation designs must therefore send straight from each source to the final bus, not through regional "collector" buses.
+
+- **Direct cross-account targets:** 
+
+Within the *same Region*, a rule can deliver straight to SQS, SNS, Lambda, Kinesis Data Streams or API Gateway in another account, with no bus in the target account.
   - This needs an execution role in the bus account plus a resource policy on the target.
   - Use it when the consumer team does not want to run a bus. Use bus-to-bus when the receiving team wants its own routing rules, or when the target is in another Region.
-- **Billing:** the sending account pays for cross-account events as custom events. The receiving account is not charged for receiving them.
+
+- **Billing:** 
+the sending account pays for cross-account events as custom events. The receiving account is not charged for receiving them.
 - In receiving rules, filter on `account` (and `region`) to tell sources apart. Never put `"*"` in the account field, because that matches nothing. Leave the field out to match all permitted senders.
+
 - **Common designs:**
   - Hub-and-spoke: workload accounts send to a central bus in a security or operations account. The central rules fan out to SQS, Lambda, Step Functions or log archives.
   - The reverse: a central bus publishes to consumer accounts.
@@ -191,7 +274,8 @@ This task tests whether you can pick the right managed building block for each p
 
 - A three-tier "workload bus to regional collector bus to central bus" chain. The third bus never receives the events because of the single-hop rule.
 - Expecting a cross-account bus target to work with only the receiver's bus policy. New targets also need the sender-side IAM role.
-- A direct cross-account SQS target in *another Region*. Direct service targets are same-Region only, so use a bus in that Region.
+- A direct cross-account SQS target in *another Region*. 
+Direct service targets are same-Region only, so use a bus in that Region.
 - Using `"account": ["*"]` in a pattern. It matches nothing.
 
 **Hands-on**

@@ -1,80 +1,187 @@
 # Domain 5: Operational Excellence and Automation (20%)
 
-Tasks 5.1 to 5.4: infrastructure as code, CI/CD and DevSecOps, observability, and operational automation.
+Tasks 5.1 to 5.4: Infrastructure as code, CI/CD and DevSecOps, observability, and operational automation.
 
 ## Task 5.1: Design infrastructure as code
 
-This task tests whether you can pick the right IaC layer for each control: authoring (CloudFormation or CDK), proactive validation (Hooks, CDK aspects), detective and corrective controls (AWS Config, drift detection), preventive guardrails (SCPs), and fleet distribution (StackSets). Most questions reduce to the same choice: stop a bad change before it is provisioned, or find and fix it afterwards, and which mechanism does each with the least operational overhead.
+This task tests whether you can pick the right IaC layer for each control: 
+authoring (CloudFormation or CDK), 
+proactive validation (Hooks, CDK aspects), 
+detective and corrective controls (AWS Config, drift detection), 
+preventive guardrails (SCPs), and 
+fleet distribution (StackSets). 
+Most questions reduce to the same choice: 
+stop a bad change before it is provisioned, or 
+find and fix it afterwards, and 
+which mechanism does each with the least operational overhead.
 
 ### Skill 5.1.1: Declarative and imperative IaC (CloudFormation, CDK)
 
 **Key concepts**
 
 - CloudFormation is declarative. You describe the end state in a template and the service works out create, update and delete order from references and `DependsOn`. The stack is the unit of lifecycle, rollback and drift detection.
-- AWS CDK is an imperative authoring layer on top of the same engine. You write TypeScript, Python, Java, C# or Go. `cdk synth` produces CloudFormation templates and assets (the cloud assembly), and `cdk deploy` deploys those templates as stacks. Deployment behavior, rollback and drift are therefore CloudFormation behavior. CDK does not bypass the engine.
-- Use CDK when you need loops, conditionals, shared libraries of L2 and L3 constructs, unit tests (the `assertions` module) and type checking. Use raw CloudFormation when templates must be readable by auditors, consumed by Service Catalog or StackSets with no build step, or owned by teams without a software toolchain.
-- CDK bootstrapping creates the `CDKToolkit` stack in each target account and Region: an S3 bucket and ECR repository for assets plus deploy, file-publishing, image-publishing, lookup and CloudFormation execution roles. For cross-account pipelines, bootstrap each target with `--trust <pipeline account>` and set `--cloudformation-execution-policies` to a least-privilege policy instead of the default AdministratorAccess.
+
+- AWS CDK is an imperative authoring layer on top of the same engine. 
+You write TypeScript, Python, Java, C# or Go. 
+`cdk synth` produces CloudFormation templates and assets (the cloud assembly), and `cdk deploy` deploys those templates as stacks. Deployment behavior, rollback and drift are therefore CloudFormation behavior. 
+CDK does not bypass the engine.
+
+- Use CDK when you need loops, conditionals, shared libraries of L2 and L3 constructs, unit tests (the `assertions` module) and type checking. 
+Use raw CloudFormation when templates must be readable by auditors, 
+consumed by Service Catalog or StackSets with no build step, or owned by teams without a software toolchain.
+
+- CDK bootstrapping creates the `CDKToolkit` stack in each target account and Region: an S3 bucket and ECR repository for assets plus deploy, file-publishing, image-publishing, lookup and CloudFormation execution roles. 
+For cross-account pipelines, bootstrap each target with `--trust <pipeline account>` and set `--cloudformation-execution-policies` to a least-privilege policy instead of the default AdministratorAccess.
+
 - Change sets preview what an update will do (add, modify, replace). Replacement of a stateful resource is the classic risk. Protect with `DeletionPolicy: Retain` or `Snapshot`, `UpdateReplacePolicy`, and stack policies that deny `Update:Replace` on databases.
-- Rollback triggers let CloudFormation watch CloudWatch alarms during and for a monitoring period after a stack operation, and roll back if an alarm fires. This is the IaC equivalent of alarm-based deployment rollback.
+
+- Rollback triggers let CloudFormation watch CloudWatch alarms during and for a monitoring period after a stack operation, and roll back if an alarm fires. 
+This is the IaC equivalent of alarm-based deployment rollback.
+
 - Stack refactoring (CLI first, console added in 2025) moves resources between stacks and renames logical IDs without deleting and recreating them. Use it to split a monolithic stack. Before this existed, the only route was `DeletionPolicy: Retain` plus resource import.
+
 - Resource import brings existing resources under a stack. The IaC generator scans an account and produces a template for resources created by hand. Both are the answer for "bring click-ops resources under IaC without recreating them".
+
 - Nested stacks reuse components inside one deployment and share one rollback. Cross-stack references (`Export` and `Fn::ImportValue`) link independent stacks but lock the exporting value: you cannot change or delete an export while another stack imports it.
 
 **Exam traps**
 
-- "Use CDK so the deployment can bypass CloudFormation limits." CDK still deploys CloudFormation stacks, so per-stack resource limits, rollback behavior and Hooks all still apply.
-- "Rename the logical ID in the template to move a resource." A changed logical ID makes CloudFormation create a new resource and delete the old one. Use stack refactoring instead.
-- Choosing a CloudFormation macro or custom resource for logic that CDK or a module can express. Macros need a Lambda function you own, and StackSets with service-managed permissions do not support macros or transforms.
+- "Use CDK so the deployment can bypass CloudFormation limits." 
+CDK still deploys CloudFormation stacks, so per-stack resource limits, rollback behavior and Hooks all still apply.
+
+- "Rename the logical ID in the template to move a resource." 
+A changed logical ID makes CloudFormation create a new resource and delete the old one. 
+Use stack refactoring instead.
+
+- Choosing a CloudFormation macro or custom resource for logic that CDK or a module can express. 
+Macros need a Lambda function you own, and StackSets with service-managed permissions do not support macros or transforms.
+
 - Treating `cdk diff` as a safety control. It is a preview for humans. It enforces nothing.
 
 **Hands-on**
 
-1. **Watch CDK become CloudFormation.** Create a CDK app in TypeScript or Python with one S3 bucket (with versioning) and one SQS queue. Run `cdk synth` and read the generated template under `cdk.out`, including the asset metadata and the bootstrap version check. Deploy it, change the bucket's logical ID in code, and run `cdk diff` to see that CDK proposes a replacement. This shows why logical IDs matter and that CDK is only an authoring layer. *Cost/cleanup:* Free tier level. Run `cdk destroy`, empty and delete the bucket if it was retained, and delete the `CDKToolkit` stack if you no longer need it.
-2. **Protect a stateful resource.** Write a raw CloudFormation template with a DynamoDB table that has `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain`, plus a stack policy that denies `Update:Replace` on that table. Create a change set that changes the table's key schema and confirm the change set shows `Replacement: True`, then try to execute it and watch the stack policy block it. *Cost/cleanup:* On-demand table with no data costs nothing. Delete the stack, then delete the retained table by hand.
+1. **Watch CDK become CloudFormation.** 
+Create a CDK app in TypeScript or Python with one S3 bucket (with versioning) and one SQS queue. 
+Run `cdk synth` and read the generated template under `cdk.out`, including the asset metadata and the bootstrap version check. Deploy it, change the bucket's logical ID in code, and run `cdk diff` to see that CDK proposes a replacement. 
+This shows why logical IDs matter and that CDK is only an authoring layer. 
+*Cost/cleanup:* Free tier level. Run `cdk destroy`, empty and delete the bucket if it was retained, and delete the `CDKToolkit` stack if you no longer need it.
+
+2. **Protect a stateful resource.** 
+Write a raw CloudFormation template with a DynamoDB table that has `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain`, plus a stack policy that denies `Update:Replace` on that table. 
+Create a change set that changes the table's key schema and confirm the change set shows `Replacement: True`, 
+then try to execute it and watch the stack policy block it. 
+*Cost/cleanup:* On-demand table with no data costs nothing. 
+Delete the stack, then delete the retained table by hand.
 
 ### Skill 5.1.2: Policy as code for proactive validation, enforcement and drift remediation
 
 **Key concepts**
 
 - Think of four layers, each with a different timing:
-  - **Synthesis time (CDK aspects, cdk-nag).** An aspect is a visitor that CDK applies to every construct in a scope during the prepare phase of synthesis. It can mutate constructs (this is how `Tags.of()` works) or add an error annotation that makes `cdk synth` fail. cdk-nag is an open-source rule pack library built on aspects. Aspects do not cross `Stage` boundaries, so apply them to the stage. They only protect teams that use your CDK code, so they are a developer feedback loop, not an organization control.
-  - **Provisioning time (CloudFormation Hooks).** Hooks inspect resources, whole stacks or change sets before CloudFormation provisions them, and also Cloud Control API operations. Implementation choices: Guard rules stored in S3 (`AWS::CloudFormation::GuardHook`), a Lambda function you own (`AWS::CloudFormation::LambdaHook`), custom Hooks built with the CloudFormation CLI and published to the registry, or AWS Control Tower proactive controls from the Control Catalog that are implemented as managed Hooks. `FailureMode` is `FAIL` (block) or `WARN` (log and continue). Filters narrow which stacks, resource types and actions (create, update, delete) are evaluated. Hooks are per account and Region, so distribute them with StackSets or Control Tower.
-  - **Preventive at the API (SCPs, RCPs).** SCPs deny API actions and condition keys regardless of tool. They cannot inspect the full configuration of a resource, only what the request and its condition keys carry. Use them for Region restrictions, protecting security tooling, denying `iam:CreateUser`, requiring tags at create time where the service supports `aws:RequestTag`.
-  - **After the fact (AWS Config rules, drift detection).** Config evaluates actual resource state no matter how it was created, including console and Terraform changes. Proactive evaluation mode exists for some managed rules, but Config is mainly detective. Remediation runs an SSM Automation runbook, manually or automatically, with retry settings.
-- CloudFormation drift detection compares a stack's resources with their template properties. Drift-aware change sets (November 2025) do a three-way comparison of the new template, the last deployed template and the live state. Executing one with deployment mode `REVERT_DRIFT` puts drifted properties back to template values and recreates resources deleted outside CloudFormation. A normal change set ignores drift, so redeploying the same template does not fix it.
-- Guard (`cfn-guard`) rules can be run in three places: locally or in CodeBuild against templates before deploy (shift left), inside a Guard Hook at provisioning, and as a custom Config rule using Guard against recorded configuration items. Same language, three timings.
-- Decision rule: block non-compliant CloudFormation deployments in every account → Hook (or Control Tower proactive control) in FAIL mode. Catch anything regardless of tool → Config rule plus remediation. Make a class of action impossible → SCP. Give developers fast feedback → aspects or cdk-nag plus Guard in CI.
+  - **Synthesis time (CDK aspects, cdk-nag).** 
+  An aspect is a visitor that CDK applies to every construct in a scope during the prepare phase of synthesis. 
+  It can mutate constructs (this is how `Tags.of()` works) or add an error annotation that makes `cdk synth` fail. 
+  cdk-nag is an open-source rule pack library built on aspects. 
+  Aspects do not cross `Stage` boundaries, so apply them to the stage. 
+  They only protect teams that use your CDK code, so they are a developer feedback loop, not an organization control.
+
+  - **Provisioning time (CloudFormation Hooks).** 
+  Hooks inspect resources, whole stacks or change sets before CloudFormation provisions them, and also Cloud Control API operations. 
+  Implementation choices: 
+  Guard rules stored in S3 (`AWS::CloudFormation::GuardHook`), 
+  a Lambda function you own (`AWS::CloudFormation::LambdaHook`), 
+  custom Hooks built with the CloudFormation CLI and published to the registry, or 
+  AWS Control Tower proactive controls from the Control Catalog that are implemented as managed Hooks. 
+  `FailureMode` is `FAIL` (block) or `WARN` (log and continue). 
+  Filters narrow which stacks, resource types and actions (create, update, delete) are evaluated. 
+  Hooks are per account and Region, so distribute them with StackSets or Control Tower.
+
+  - **Preventive at the API (SCPs, RCPs).** 
+  SCPs deny API actions and condition keys regardless of tool. 
+  They cannot inspect the full configuration of a resource, only what the request and its condition keys carry. 
+  Use them for Region restrictions, protecting security tooling, denying `iam:CreateUser`, 
+  requiring tags at create time where the service supports `aws:RequestTag`.
+
+  - **After the fact (AWS Config rules, drift detection).** 
+  Config evaluates actual resource state no matter how it was created, including console and Terraform changes. 
+  Proactive evaluation mode exists for some managed rules, but Config is mainly detective. 
+  Remediation runs an SSM Automation runbook, manually or automatically, with retry settings.
+
+- CloudFormation drift detection compares a stack's resources with their template properties. 
+Drift-aware change sets (November 2025) do a three-way comparison of the new template, the last deployed template and the live state. 
+Executing one with deployment mode `REVERT_DRIFT` puts drifted properties back to template values and recreates resources deleted outside CloudFormation. A normal change set ignores drift, so redeploying the same template does not fix it.
+
+- Guard (`cfn-guard`) rules can be run in three places: locally or in CodeBuild against templates before deploy (shift left), inside a Guard Hook at provisioning, and as a custom Config rule using Guard against recorded configuration items. 
+Same language, three timings.
+
+- Decision rule: block non-compliant CloudFormation deployments in every account → Hook (or Control Tower proactive control) in FAIL mode. 
+Catch anything regardless of tool → Config rule plus remediation. 
+Make a class of action impossible → SCP. Give developers fast feedback → aspects or cdk-nag plus Guard in CI.
 
 **Exam traps**
 
-- Picking an AWS Config rule when the requirement says "prevent" or "before the resource is created". Config sees the resource after it exists. Even with automatic remediation, the non-compliant resource existed for a period.
-- Picking CDK aspects as the organization-wide enforcement. Any team using plain CloudFormation, the console or another tool bypasses them.
-- Picking an SCP to enforce a property that is not a condition key on the create call. Check whether the service publishes a condition key for the property; when it does not, a Hook or Guard rule is the way to validate it.
-- Assuming Hooks cover resources created through the console or direct service APIs. They cover CloudFormation operations and Cloud Control API operations only.
+- Picking an AWS Config rule when the requirement says "prevent" or "before the resource is created". 
+Config sees the resource after it exists. 
+Even with automatic remediation, the non-compliant resource existed for a period.
+
+- Picking CDK aspects as the organization-wide enforcement. 
+Any team using plain CloudFormation, the console or another tool bypasses them.
+
+- Picking an SCP to enforce a property that is not a condition key on the create call. 
+Check whether the service publishes a condition key for the property; when it does not, a Hook or Guard rule is the way to validate it.
+
+- Assuming Hooks cover resources created through the console or direct service APIs. 
+They cover CloudFormation operations and Cloud Control API operations only.
+
 - Starting in FAIL mode across an organization. The safer rollout is WARN first, review the Hooks invocation summary, then switch to FAIL.
 
 **Hands-on**
 
-1. **Guard Hook in WARN then FAIL.** Write a Guard rule file that requires `AWS::S3::Bucket` to have `VersioningConfiguration.Status == "Enabled"`, upload it to an S3 bucket, and deploy an `AWS::CloudFormation::GuardHook` with `TargetOperations: [RESOURCE]`, `FailureMode: WARN` and a `LogBucket`. Deploy a stack with an unversioned bucket, see the warning in the stack events and the Hooks invocation summary, then switch `FailureMode` to `FAIL` and watch the same deployment fail before the bucket is created. *Cost/cleanup:* Hooks invocations for a few test stacks are negligible; check the CloudFormation pricing page for third-party and Hook handler operations. Delete the test stacks, the Hook stack and the rules and log buckets.
-2. **Aspect and drift-aware change set.** In a CDK app, add an aspect that calls `Annotations.of(node).addError()` for any `CfnBucket` without encryption settings, and confirm `cdk synth` fails. Fix it and deploy. Then in the console change the bucket's tags or a security group rule that the stack owns, run drift detection, and create a change set with the drift-aware type (`--deployment-mode REVERT_DRIFT` in the CLI) to see the out-of-band change listed and reverted. *Cost/cleanup:* Free. `cdk destroy` and delete any retained bucket.
+1. **Guard Hook in WARN then FAIL.** 
+Write a Guard rule file that requires `AWS::S3::Bucket` to have `VersioningConfiguration.Status == "Enabled"`, 
+upload it to an S3 bucket, and deploy an `AWS::CloudFormation::GuardHook` with `TargetOperations: [RESOURCE]`, `FailureMode: WARN` and a `LogBucket`. 
+Deploy a stack with an unversioned bucket, see the warning in the stack events and the Hooks invocation summary, 
+then switch `FailureMode` to `FAIL` and watch the same deployment fail before the bucket is created. 
+*Cost/cleanup:* 
+Hooks invocations for a few test stacks are negligible; check the CloudFormation pricing page for third-party and Hook handler operations. Delete the test stacks, the Hook stack and the rules and log buckets.
+
+2. **Aspect and drift-aware change set.** 
+In a CDK app, add an aspect that calls `Annotations.of(node).addError()` for any `CfnBucket` without encryption settings, and confirm `cdk synth` fails. Fix it and deploy. 
+Then in the console change the bucket's tags or a security group rule that the stack owns, run drift detection, and 
+create a change set with the drift-aware type (`--deployment-mode REVERT_DRIFT` in the CLI) to see the out-of-band change listed and reverted. 
+*Cost/cleanup:* 
+Free. `cdk destroy` and delete any retained bucket.
 
 ### Skill 5.1.3: Manage secrets in infrastructure code
 
 **Key concepts**
 
-- Never place a secret value in a template, a parameter default, CDK source or a pipeline variable. Templates are stored, shown in the console and copied to artifact buckets.
+- Never place a secret value in a template, a parameter default, CDK source or a pipeline variable. 
+Templates are stored, shown in the console and copied to artifact buckets.
+
 - Dynamic references resolve values at deploy time without storing them in the template:
   - `{{resolve:ssm:name:version}}` for plaintext String parameters.
-  - `{{resolve:ssm-secure:name:version}}` for SecureString parameters. This works only for a defined list of resource properties, and CloudFormation cannot create SecureString parameters itself.
+  - `{{resolve:ssm-secure:name:version}}` for SecureString parameters. 
+  This works only for a defined list of resource properties, and CloudFormation cannot create SecureString parameters itself.
+
   - `{{resolve:secretsmanager:secret-id:SecretString:json-key:version-stage:version-id}}` for Secrets Manager. You can reference a specific JSON key and the `AWSCURRENT` or `AWSPREVIOUS` stage.
+
 - Secrets Manager vs Parameter Store:
   - Secrets Manager: built-in rotation (managed rotation for supported services, or a rotation Lambda function), cross-Region replica secrets, resource policies for cross-account use, `GenerateSecretString` in `AWS::SecretsManager::Secret`, `AWS::SecretsManager::RotationSchedule`, and `SecretTargetAttachment` to wire a secret to a database. Charged per secret per month plus API calls.
+
   - Parameter Store: hierarchy, String, StringList and SecureString (KMS), standard tier (free, up to 4 KB values) and advanced tier (charged, up to 8 KB, parameter policies such as expiration notifications). No native rotation.
+
   - Rule: database credentials or anything that must rotate → Secrets Manager. Configuration values, feature settings, AMI IDs → Parameter Store.
-- Amazon RDS and Aurora can manage the master password in Secrets Manager for you (`ManageMasterUserPassword`). RDS creates the secret and rotates it. This removes both the password parameter and the rotation function from your template.
+
+- Amazon RDS and Aurora can manage the master password in Secrets Manager for you (`ManageMasterUserPassword`). 
+RDS creates the secret and rotates it. This removes both the password parameter and the rotation function from your template.
+
 - CDK: `Secret.fromSecretNameV2()` and `SecretValue.secretsManager()` render as dynamic references, so the value never appears in `cdk.out`. `SecretValue.unsafePlainText()` is named that way for a reason.
+
 - `NoEcho: true` masks a parameter in console and API output, but the value still has to come from somewhere (often a pipeline variable) and is not rotated. It is a masking feature, not secret management.
+
 - Consumers should read secrets at runtime (Secrets Manager caching libraries, the Lambda extension for Parameters and Secrets, ECS task definition `secrets` that inject from Secrets Manager or Parameter Store, the Secrets Store CSI driver on EKS). Injecting into an environment variable at deploy time means a rotation is not picked up until redeploy.
+
 - Cross-account: a secret shared with another account must use a customer managed KMS key whose key policy allows that account, plus a resource policy on the secret. The default `aws/secretsmanager` key cannot be used cross-account.
 
 **Exam traps**

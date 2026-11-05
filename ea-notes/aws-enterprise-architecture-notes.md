@@ -2,7 +2,9 @@
 
 Working notes for designing enterprise-grade systems on AWS: multi-account, secure, resilient, scalable and cost-optimized. Each section pairs core concepts with design scenarios that show how to choose between options and why.
 
-> **Living document.** Service names, features and availability change often. Check the linked AWS documentation before relying on a detail, and record changes in the [revision history](#revision-history).
+> **Living document.** 
+Service names, features and availability change often. 
+Check the linked AWS documentation before relying on a detail, and record changes in the [revision history](#revision-history).
 
 ## Contents
 
@@ -26,7 +28,9 @@ A useful mental model for enterprise architecture on AWS is to group services in
 - Resilience and migration
 - Security, operations and cost
 
-Real architectures span all of them at once: a multi-account, secure, resilient, cost-optimized system touches every pillar. The [AWS Well-Architected Framework](https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html) is the reference for trade-offs across them.
+Real architectures span all of them at once: a multi-account, secure, resilient, cost-optimized system touches every pillar. 
+
+The [AWS Well-Architected Framework](https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html) is the reference for trade-offs across them.
 
 Each design scenario follows the same shape: the situation, the approaches considered, the recommended approach, and why the others fall short. Use them to practise reasoning about trade-offs, not to memorise answers.
 
@@ -34,11 +38,17 @@ Each design scenario follows the same shape: the situation, the approaches consi
 
 | Pillar | Key services and concepts | What an architect focuses on |
 | --- | --- | --- |
+
 | 1. Organizational governance and multi-account strategy | AWS Organizations · AWS Control Tower · Service Control Policies (SCPs) · AWS IAM Identity Center · AWS Config and CloudTrail | Moving away from siloed single accounts. Multi-account designs for billing isolation, security boundaries and autonomous business units, provisioned with automated guardrails. |
+
 | 2. Advanced networking and hybrid connectivity | Amazon VPC · Transit Gateway · Direct Connect and VPN · Route 53 (routing policies, Resolver) · VPC sharing, endpoints and PrivateLink | Enterprise network topologies across regions and hybrid data centres; centralized inspection VPCs; egress control; IP exhaustion and overlapping CIDRs. |
+
 | 3. Compute, containers and serverless | Amazon EC2 and Auto Scaling · ECS and EKS (Fargate and EC2) · AWS Lambda and Step Functions · Elastic Load Balancing (ALB/NLB) | Choosing the execution model by scalability, state management, operational complexity, cold-start profile and service decoupling. |
+
 | 4. Storage, databases and data management | Amazon S3 (lifecycle, storage classes) · EBS, EFS, FSx · Amazon Aurora (Global Database, Serverless) · DynamoDB (Global Tables) · Redshift | Durability, throughput and latency; relational vs NoSQL; multi-region replication strategies. |
+
 | 5. Resilience, disaster recovery and migration | AWS Backup · AWS Elastic Disaster Recovery · Route 53 Application Recovery Controller · AWS Database Migration Service · the 7 Rs of migration | Setting RTO/RPO and choosing a DR pattern (backup and restore, pilot light, warm standby, multi-region active-active); leading large data migrations. |
+
 | 6. Security, operations and cost optimization (FinOps) | KMS, ACM, Secrets Manager · Trusted Advisor and Cost Explorer · Systems Manager (Patch Manager, Automation) · GuardDuty, Security Hub, Inspector | Least privilege across accounts, automated patching, centralized log analytics, and pricing models (Savings Plans, Spot, lifecycle policies). |
 
 ---
@@ -50,55 +60,98 @@ Multi-account strategy, centralized governance, cross-account access, and hybrid
 ### Key services and documentation
 
 | Service or concept | Documentation |
+
 | --- | --- |
 | AWS Organizations | [User guide](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_introduction.html) |
+
 | Organizational units (OUs) | [Managing OUs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_ous.html) |
+
 | Management account | [Security reference architecture](https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/management-account.html) |
+
 | Service control policies (SCPs) | [SCPs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html) |
+
 | AWS Control Tower | [User guide](https://docs.aws.amazon.com/controltower/latest/userguide/what-is-control-tower.html) |
+
 | Account Factory | [Account Factory](https://docs.aws.amazon.com/controltower/latest/userguide/account-factory.html) |
+
 | Control Tower controls (guardrails) | [Controls reference](https://docs.aws.amazon.com/controltower/latest/controlreference/introduction.html) |
+
 | Landing zone | [Prescriptive guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/strategy-migration/aws-landing-zone.html) |
+
 | AWS Resource Access Manager (RAM) | [User guide](https://docs.aws.amazon.com/ram/latest/userguide/what-is.html) |
+
 | AWS CloudTrail | [User guide](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html) |
+
 | AWS Config | [Developer guide](https://docs.aws.amazon.com/config/latest/developerguide/WhatIsConfig.html) · [with Control Tower](https://docs.aws.amazon.com/controltower/latest/userguide/config.html) |
+
 | Amazon VPC | [User guide](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) |
+
 | AWS Transit Gateway | [User guide](https://docs.aws.amazon.com/vpc/latest/tgw/what-is-transit-gateway.html) |
+
 | AWS License Manager | [User guide](https://docs.aws.amazon.com/license-manager/latest/userguide/license-manager.html) |
+
 | Amazon EC2 | [Concepts](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html) |
+
 | EC2 Image Builder | [User guide](https://docs.aws.amazon.com/imagebuilder/latest/userguide/what-is-image-builder.html) |
+
 | AWS Systems Manager | [User guide](https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html) |
+
 | Amazon EBS | [User guide](https://docs.aws.amazon.com/ebs/latest/userguide/what-is-ebs.html) |
+
 | Amazon EKS | [Deployment options](https://docs.aws.amazon.com/whitepapers/latest/overview-deployment-options/amazon-elastic-kubernetes-service.html) |
+
 | Amazon ECS | [Developer guide](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) |
+
 | Amazon S3 | [User guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) |
+
 | Billing and Cost Management | [User guide](https://docs.aws.amazon.com/cost-management/latest/userguide/what-is-costmanagement.html) |
 
 ### 1.1 Multi-account strategy and governance
 
 **Scope:** multi-account environments with **AWS Organizations** and **AWS Control Tower**; guardrails with **SCPs**; resource sharing with **AWS RAM**; centralized logging with **CloudTrail** and **Config**.
 
-Enterprise architectures rarely use a single AWS account. They rely on multi-account structures governed by automated guardrails, cross-account resource sharing, and centralized auditing.
+Enterprise architectures rarely use a single AWS account. 
+They rely on multi-account structures governed by automated guardrails, cross-account resource sharing, and centralized auditing.
 
 #### Core concepts
 
-**AWS Organizations and AWS Control Tower.** A multi-account architecture separates workloads by security, billing and operational boundaries.
+**AWS Organizations and AWS Control Tower.** 
+A multi-account architecture separates workloads by security, billing and operational boundaries.
 
 - **AWS Organizations** provides central governance through a hierarchy of **organizational units (OUs)** under a single **management account** (formerly the master account).
+
 - **AWS Control Tower** builds on Organizations to automate a secure, compliant multi-account environment, known as a **landing zone**.
+
 - **Account Factory** is the automated provisioning workflow that gives every new account standard baselines: networking, CloudTrail, IAM Identity Center integration.
-- **Controls (guardrails)** come in two kinds: *preventive* (implemented with SCPs) and *detective* (implemented with AWS Config rules). Control Tower also offers *proactive* controls that check resources before deployment.
 
-**Service control policies (SCPs).** JSON policies that set the maximum permissions for accounts in an OU or the whole organization.
+- **Controls (guardrails)** come in two kinds: 
+*preventive* (implemented with SCPs) and 
+*detective* (implemented with AWS Config rules). 
+Control Tower also offers *proactive* controls that check resources before deployment.
 
-- **SCPs never grant permissions.** They act as a ceiling on what IAM policies in the account can grant.
-- **Default state:** the root has the `FullAWSAccess` SCP attached, which allows everything. A restrictive SCP cascades to all child OUs and accounts.
-- **Explicit deny wins:** a `Deny` anywhere in the hierarchy overrides any `Allow`.
-- **Management account exception:** SCPs never apply to the management account, which keeps full administrative power.
-- **Related policy types:** resource control policies (RCPs) set a ceiling on permissions granted by resource-based policies, complementing SCPs.
+**Service control policies (SCPs).** 
+JSON policies that set the maximum permissions for accounts in an OU or the whole organization.
 
-**AWS Resource Access Manager (RAM).** Governed sharing of specific resources across accounts in an organization or OU. Commonly shared resources:
+- **SCPs never grant permissions.** 
+They act as a ceiling on what IAM policies in the account can grant.
 
+- **Default state:** 
+the root has the `FullAWSAccess` SCP attached, which allows everything. 
+A restrictive SCP cascades to all child OUs and accounts.
+
+- **Explicit deny wins:** 
+a `Deny` anywhere in the hierarchy overrides any `Allow`.
+
+- **Management account exception:** 
+SCPs never apply to the management account, which keeps full administrative power.
+
+- **Related policy types:** 
+resource control policies (RCPs) set a ceiling on permissions granted by resource-based policies, complementing SCPs.
+
+**AWS Resource Access Manager (RAM).** 
+Governed sharing of specific resources across accounts in an organization or OU. 
+
+Commonly shared resources:
 - VPC subnets
 - Transit gateways
 - Route 53 Resolver rules
@@ -109,41 +162,69 @@ Enterprise architectures rarely use a single AWS account. They rely on multi-acc
 
 #### Enterprise use cases
 
-- **Regulatory boundary in financial services:** isolate the PCI-DSS cardholder data environment in dedicated OUs. Use SCPs to block internet gateways, public S3 buckets and unapproved regions. Aggregate all security logs in an isolated, tamper-resistant audit account.
-- **Shared network infrastructure:** centralize hybrid connectivity on Transit Gateway and share subnets with application teams through RAM. Teams cannot misconfigure enterprise routing, and internal traffic stays fast.
+- **Regulatory boundary in financial services:** 
+isolate the PCI-DSS cardholder data environment in dedicated OUs. 
+Use SCPs to block internet gateways, public S3 buckets and unapproved regions. 
+Aggregate all security logs in an isolated, tamper-resistant audit account.
+
+- **Shared network infrastructure:** 
+centralize hybrid connectivity on Transit Gateway and share subnets with application teams through RAM. 
+Teams cannot misconfigure enterprise routing, and internal traffic stays fast.
 
 #### Best practices
 
-1. **Never run workloads in the management account.** Restrict it to billing, Organizations management and cross-account role assumption.
-2. **Delegate administration.** Use delegated administrator accounts for GuardDuty, Config, Security Hub and Macie, so security teams work from member accounts, not the management account.
+1. **Never run workloads in the management account.** 
+Restrict it to billing, Organizations management and cross-account role assumption.
+
+2. **Delegate administration.** 
+Use delegated administrator accounts for GuardDuty, Config, Security Hub and Macie, so security teams work from member accounts, not the management account.
+
 3. **Enforce an organization trail.** Configure an organization-wide CloudTrail trail with global service events, and protect the destination bucket with strict bucket policies and S3 Object Lock.
 
 #### Scenario 1: Central guardrails that no account can bypass
 
-**Situation:** A multinational enterprise needs a multi-account architecture. Compliance requires that no account can disable CloudTrail and that all S3 buckets are blocked from public access. How should these guardrails be enforced centrally?
+**Situation:** 
+A multinational enterprise needs a multi-account architecture. 
+Compliance requires that no account can disable CloudTrail and that all S3 buckets are blocked from public access. How should these guardrails be enforced centrally ?
 
 | Approach | Assessment |
 | --- | --- |
+
 | IAM policies on the administrator role in each account, denying CloudTrail deletion and S3 public access | Weak. Local administrators with enough privilege can change or detach IAM policies, so this is not a hard organizational guardrail. |
+
 | Lambda script that scans every account and deletes non-compliant buckets | Weak. Reactive, prone to race conditions, adds operational overhead, and does not stop the action happening. |
-| **SCPs at the organization root or OU with explicit `Deny` for CloudTrail deletion and S3 public-access changes** | **Recommended.** SCPs set the maximum permissions for every account in scope. An explicit deny cannot be overridden even by the member account's root user. |
+
+| **SCPs at the organization root or OU with explicit `Deny` for CloudTrail deletion and S3 public-access changes** | **Recommended.** 
+SCPs set the maximum permissions for every account in scope. An explicit deny cannot be overridden even by the member account's root user. |
+
 | Trusted Advisor with email alerts in each account | Weak. Advisory checks and notifications, not preventive controls. |
 
 #### Scenario 2: Why an SCP seems not to work
 
-**Situation:** An organization has 150 member accounts. Security attaches a custom SCP to the Production OU to stop accounts disabling GuardDuty or changing critical logging. An administrator in a Production account can still delete a custom IAM policy, and reports the SCP is "failing". An auditor also finds the management account running resources in an unapproved region. What explains both behaviours?
+**Situation:** 
+An organization has 150 member accounts. Security attaches a custom SCP to the Production OU to stop accounts disabling GuardDuty or changing critical logging. 
+An administrator in a Production account can still delete a custom IAM policy, and reports the SCP is "failing". An auditor also finds the management account running resources in an unapproved region. 
+What explains both behaviours?
 
 **Correct explanations:**
 
-- **SCPs do not apply to the management account.** Guardrails for it must come from IAM policies and permissions boundaries inside it, and from keeping workloads out of it.
-- **SCPs set a ceiling, not a grant.** The SCP did not deny IAM policy deletion, so whether the administrator could delete the policy depended on IAM permissions in the account. That is expected behaviour, not a failure.
+- **SCPs do not apply to the management account.** 
+Guardrails for it must come from IAM policies and permissions boundaries inside it, and 
+from keeping workloads out of it.
+
+- **SCPs set a ceiling, not a grant.** 
+The SCP did not deny IAM policy deletion, so whether the administrator could delete the policy depended on IAM permissions in the account. 
+That is expected behaviour, not a failure.
 
 **Common misconceptions:**
 
 | Misconception | Reality |
 | --- | --- |
+
 | An explicit deny in an SCP only works when paired with an explicit allow for the same resource ARN | An explicit deny blocks the action on its own. |
+
 | `FullAWSAccess` attached alongside a restrictive SCP cancels the restriction | Policies at each level combine as an intersection; `FullAWSAccess` does not neutralize a deny. |
+
 | SCPs cannot filter resource-level permissions unless attached at the root | SCPs can use resources and conditions at any level. Attachment level changes inheritance scope only. |
 
 #### Scenario 3: Centralized CloudTrail logs with a cross-account KMS key

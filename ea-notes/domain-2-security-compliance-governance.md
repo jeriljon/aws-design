@@ -1,48 +1,107 @@
 # Domain 2: Security, Compliance, and Governance (25%)
 
-Tasks 2.1 to 2.5: identity, encryption and key management, multi-account governance, compliance, and responsible AI controls.
+Tasks 2.1 to 2.5: 
+identity, encryption and key management, 
+multi-account governance, compliance, and 
+responsible AI controls.
 
 ## Task 2.1: Design identity security architectures
 
-This task tests whether you can pick the right identity mechanism for each kind of principal: workforce humans, customer users, AWS workloads, workloads outside AWS, and cross-account callers. Then it tests whether you can bound what each one can do with layered policies. The recurring decision: which mechanism issues short-lived credentials here, and which policy layer stops the blast radius when something goes wrong.
+This task tests whether you can pick the right identity mechanism for each kind of principal: 
+workforce humans, customer users, AWS workloads, workloads outside AWS, and cross-account callers. 
+Then it tests whether you can bound what each one can do with layered policies. 
+The recurring decision: which mechanism issues short-lived credentials here, and 
+which policy layer stops the blast radius when something goes wrong.
 
 ### Skill 2.1.1: Identity federation with standard protocols
 
 **Key concepts**
 
-- Workforce access to many accounts: use AWS IAM Identity Center with an organization instance, connected to the corporate IdP (Entra ID, Okta, Ping) over SAML 2.0 for sign-in and SCIM for automatic user and group provisioning. SAML carries the authentication; SCIM keeps users and groups in sync. They solve different problems and you usually need both.
-- Identity Center does not create users at first SAML sign-in. Without SCIM, someone must create users and groups in Identity Center before sign-in works. A scenario where "new hires cannot sign in until an admin creates them" is fixed by enabling SCIM, not by changing SAML settings.
+- Workforce access to many accounts: 
+Use AWS IAM Identity Center with an organization instance, connected to the corporate IdP (Entra ID, Okta, Ping) over SAML 2.0 for sign-in and SCIM for automatic user and group provisioning. 
+SAML carries the authentication; 
+SCIM keeps users and groups in sync. 
+They solve different problems and you usually need both.
+
+- Identity Center does not create users at first SAML sign-in. 
+Without SCIM, someone must create users and groups in Identity Center before sign-in works. 
+A scenario where "new hires cannot sign in until an admin creates them" is fixed by enabling SCIM, not by changing SAML settings.
+
 - Permission sets are templates. Identity Center provisions them into each assigned account as IAM roles named `AWSReservedSSO_<set>_<suffix>`, under the `aws-reserved/sso.amazonaws.com/` path. Do not edit those roles directly; change the permission set and re-provision. In resource policies, match them with a wildcard on the role ARN (`aws:PrincipalArn` with `ArnLike`) rather than hard-coding the generated suffix.
+
 - Identity Center attributes for access control pass IdP attributes (department, cost center) as session tags, which enables ABAC across accounts with one permission set instead of one per team.
+
 - Delegate Identity Center administration to a member account (delegated administrator) so day-to-day work does not happen in the management account. Permission sets that target the management account can only be managed from the management account.
+
 - Direct IAM SAML or OIDC federation (an IAM identity provider in each account plus `AssumeRoleWithSAML` or `AssumeRoleWithWebIdentity`) is still valid for a single account, for machine flows such as GitHub Actions OIDC to AWS, or where an existing IdP integration must be kept per account. For many accounts, it is more operational overhead than Identity Center.
+
 - OIDC for CI/CD: an IAM OIDC identity provider for `token.actions.githubusercontent.com`, with a role trust policy that pins `aud` and the `sub` claim (repository and branch or environment). An unpinned `sub` lets any repository on that platform assume the role.
+
 - Identity Center trusted identity propagation passes the end user identity to services such as Amazon Redshift, Lake Formation and S3 Access Grants, so data access decisions and audit logs see the human, not a shared role.
 
 **Exam traps**
 
 - "Create IAM users in each account and sync passwords from Active Directory." It works but fails any "least operational overhead" or "short-lived credentials" requirement.
+
 - Choosing SAML alone when the requirement is "users and group membership changes in the IdP must appear in AWS automatically." That is SCIM.
+
 - Picking Amazon Cognito for workforce access to the AWS console. Cognito is for application users, not for AWS account access.
+
 - Editing the `AWSReservedSSO_*` role in a member account to fix permissions. The next re-provisioning overwrites it.
 
 **Hands-on**
 
 1. **Identity Center with an external IdP.** Enable an organization instance of IAM Identity Center in a test organization (or an account instance if you only have one account). Create a free developer tenant at an IdP that supports SAML and SCIM (Okta and Microsoft Entra ID both offer free developer or trial tenants). Configure SAML with the Identity Center metadata, enable automatic provisioning, and paste the SCIM endpoint and token into the IdP. Add a user to a group in the IdP and watch it appear in Identity Center within minutes, then assign a permission set and sign in through the access portal. *Cost/cleanup:* Identity Center has no charge. Delete the permission set assignments, revoke the SCIM token, and delete the IdP test app.
+
 2. **GitHub Actions OIDC role.** Create an IAM OIDC provider for GitHub, then a role whose trust policy requires `token.actions.githubusercontent.com:aud` equal to `sts.amazonaws.com` and `sub` matching `repo:<you>/<repo>:ref:refs/heads/main`. Run a workflow that calls `aws sts get-caller-identity`. Then push from another branch and confirm the assume fails. This proves the `sub` condition is the real security boundary. *Cost/cleanup:* free. Delete the role and the OIDC provider.
 
 ### Skill 2.1.2: Application authentication and authorization
 
 **Key concepts**
 
-- Amazon Cognito user pools authenticate application users and issue OIDC tokens (ID, access, refresh). Identity pools exchange a token (from a user pool, a social IdP, SAML, or an OIDC IdP) for temporary AWS credentials through an IAM role. Rule: need JWTs for your API, use a user pool. Need the browser or mobile app to call AWS services directly (S3 upload, DynamoDB), add an identity pool.
+- Amazon Cognito user pools authenticate application users and issue OIDC tokens (ID, access, refresh). Identity pools exchange a token (from a user pool, a social IdP, SAML, or an OIDC IdP) for temporary AWS credentials through an IAM role. 
+Rule: need JWTs for your API, use a user pool. 
+Need the browser or mobile app to call AWS services directly (S3 upload, DynamoDB), add an identity pool.
+
 - Identity pools can choose the IAM role from token claims (role mapping rules), or use principal tags from claims for ABAC, for example to restrict S3 access to a prefix equal to the user's `sub` using `${cognito-identity.amazonaws.com:sub}`.
-- OAuth 2.0 flows: authorization code with PKCE for browser and mobile apps; client credentials for machine-to-machine. Cognito supports client credentials with resource servers and custom scopes. The implicit grant is legacy and should not be the answer for a new app.
-- Cognito user pools have feature plans (Lite, Essentials, Plus). Threat protection features such as adaptive authentication and compromised-credential detection sit in the Plus plan. If a scenario demands risk-based MFA for customer sign-ins with minimum custom code, that is the Cognito feature, not a Lambda trigger you write.
-- API authorization choices: API Gateway Cognito authorizer (validates user pool tokens, scope checks), JWT authorizer on HTTP APIs (any OIDC issuer), Lambda authorizer (custom logic, cache the result), IAM authorization (SigV4, for AWS callers). For fine-grained, policy-based authorization inside the application, Amazon Verified Permissions evaluates Cedar policies against principals and resources.
+
+- OAuth 2.0 flows: authorization code with PKCE for browser and mobile apps; client credentials for machine-to-machine. 
+Cognito supports client credentials with resource servers and custom scopes. 
+The implicit grant is legacy and should not be the answer for a new app.
+
+- Cognito user pools have feature plans (Lite, Essentials, Plus). 
+Threat protection features such as adaptive authentication and compromised-credential detection sit in the Plus plan. 
+If a scenario demands risk-based MFA for customer sign-ins with minimum custom code, that is the Cognito feature, not a Lambda trigger you write.
+
+- API authorization choices: 
+API Gateway Cognito authorizer (validates user pool tokens, scope checks), JWT authorizer on HTTP APIs (any OIDC issuer), Lambda authorizer (custom logic, cache the result), IAM authorization (SigV4, for AWS callers). 
+For fine-grained, policy-based authorization inside the application, Amazon Verified Permissions evaluates Cedar policies against principals and resources.
+
 - ALB can authenticate users itself (OIDC or Cognito) before forwarding, which removes auth code from legacy backends that cannot be changed.
+
 - Amazon EKS Pod Identity gives pods AWS credentials. The role trusts the single service principal `pods.eks.amazonaws.com`, so the same role works across clusters without per-cluster OIDC providers. An association in the EKS API maps a namespace and service account to a role, and the EKS Pod Identity Agent (a DaemonSet add-on) serves credentials on each node. Credentials carry session tags such as cluster and namespace, which you can use for ABAC.
-- IRSA (IAM roles for service accounts) uses a per-cluster IAM OIDC provider and a trust policy that names that provider and the service account. Pod Identity works only on Linux EC2 worker nodes. It is not supported on Fargate, Windows nodes, Outposts, EKS Anywhere or self-managed Kubernetes on EC2. For those, IRSA (or another mechanism) is still the answer. Both can run in the same cluster during migration.
+
+- IRSA (IAM roles for service accounts) uses a per-cluster IAM OIDC provider and a trust policy that names that provider and the service account. 
+Pod Identity works only on Linux EC2 worker nodes. 
+It is not supported on Fargate, Windows nodes, Outposts, EKS Anywhere or self-managed Kubernetes on EC2. For those, IRSA (or another mechanism) is still the answer. Both can run in the same cluster during migration.
+
+##### Note: 
+IAM Roles for Service Accounts (IRSA) is an Amazon EKS feature that securely maps Kubernetes service accounts to AWS IAM roles, allowing Pod-level workloads to access AWS resources without static credentials.
+
+Why IRSA is Crucial
+
+Historically, pods requiring AWS access had to use long-lived access keys (stored in Kubernetes secrets) or leverage the overarching IAM role of the EC2 worker node.
+• The Risk: Sharing an IAM role across a whole EC2 node grants every pod on that node the exact same broad permissions, violating the principle of least privilege.
+• The IRSA Solution: It creates a dedicated security boundary per workload. Workload A can be limited to reading a specific S3 bucket, while Workload B on the same node can only access a DynamoDB table.
+
+
+How IRSA Works Under the Hood
+
+IRSA relies on workload identity federation through OpenID Connect (OIDC) and the AWS Security Token Service (STS):
+1. OIDC Establishment: You associate an IAM OIDC Identity Provider with your EKS cluster.
+2. The Link: A Kubernetes Service Account is configured with a specific annotation linking it to an IAM Role (eks.amazonaws.com/role-arn). The IAM Role's trust policy explicitly trusts the EKS cluster's OIDC issuer URL for that specific namespace and service account name.
+3. Token Exchange: When a Pod launches, EKS automatically injects a projected OIDC token and two environment variables (AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE) into the container.
+4. AWS API Call: The application's AWS SDK reads these variables and calls sts:AssumeRoleWithWebIdentity. AWS STS verifies the token against the cluster's OIDC endpoint and returns short-lived, auto-rotating temporary credentials.
 
 **Exam traps**
 
@@ -54,89 +113,249 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Hands-on**
 
-1. **User pool plus identity pool for direct S3 upload.** Create a Cognito user pool with a hosted or managed login app client using the authorization code grant with PKCE. Create an identity pool that trusts the user pool and an authenticated role whose policy allows `s3:PutObject` only on `arn:aws:s3:::bucket/private/${cognito-identity.amazonaws.com:sub}/*`. Sign in with two test users from a small web page or the AWS CLI and confirm each can only write under its own prefix. *Cost/cleanup:* within free usage for a handful of users. Delete the identity pool, user pool and bucket.
+1. **User pool plus identity pool for direct S3 upload.** 
+Create a Cognito user pool with a hosted or managed login app client using the authorization code grant with PKCE. Create an identity pool that trusts the user pool and an authenticated role whose policy allows `s3:PutObject` only on `arn:aws:s3:::bucket/private/${cognito-identity.amazonaws.com:sub}/*`. Sign in with two test users from a small web page or the AWS CLI and confirm each can only write under its own prefix. *Cost/cleanup:* within free usage for a handful of users. Delete the identity pool, user pool and bucket.
 2. **EKS Pod Identity versus IRSA (cost warning).** Create a small EKS cluster with one Linux managed node group and install the EKS Pod Identity Agent add-on. Create a role trusting `pods.eks.amazonaws.com` with read access to one S3 bucket, associate it with a service account, and run a pod that lists the bucket. Then run a pod with a different service account and confirm it is denied. If cost is a concern, do the same lab in AWS Workshop Studio (EKS workshops) instead. *Cost/cleanup:* the EKS control plane bills per hour and the nodes bill as EC2; finish in one sitting and delete the cluster, node group and any load balancers.
 
 ### Skill 2.1.3: Least-privilege access controls
 
 **Key concepts**
 
-- Policy evaluation order for a request: explicit deny anywhere wins. Then the request must be allowed by every applicable guardrail (SCPs on the principal's account, RCPs on the resource's account, permissions boundary, session policy) and granted by an identity-based or resource-based policy. Guardrails never grant.
-- Cross-account access: either a role in the target account that the caller assumes (role trust policy plus caller permission for `sts:AssumeRole`), or a resource-based policy that names the external principal. With a resource-based policy, the caller keeps its own identity and permissions; with a role, it gives them up for the role's. This matters for S3 object ownership and for services that need the caller's own permissions at the same time.
-- External ID: a condition `sts:ExternalId` in the role trust policy. Its purpose is the confused deputy problem when a third party (a SaaS vendor) assumes roles in many customer accounts. It is not a secret password and not needed for your own accounts. For AWS service principals, the equivalent protection is `aws:SourceArn` and `aws:SourceAccount` conditions.
-- Permissions boundaries: a managed policy that caps an IAM user or role. Classic use is delegated administration: developers may create roles only if they attach a specific boundary (`iam:PermissionsBoundary` condition), so they cannot escalate beyond it.
-- Session policies: passed on `AssumeRole` or `GetFederationToken`; they further restrict that one session. Use them to vend scoped-down credentials (for example per-tenant) from a broader role without creating a role per tenant.
-- ABAC: compare `aws:PrincipalTag/x` with `aws:ResourceTag/x` (or `aws:RequestTag` on create). It scales with fewer policies, but you must protect the tags: deny `iam:TagRole`, resource tag changes, and require tags on create, or users can tag themselves into access.
+- Policy evaluation order for a request: 
+Explicit deny anywhere wins. 
+Then the request must be allowed by every applicable guardrail (SCPs on the principal's account, RCPs on the resource's account, permissions boundary, session policy) and granted by an identity-based or resource-based policy. 
+Guardrails never grant.
+
+- Cross-account access: 
+Either a role in the target account that the caller assumes (role trust policy plus caller permission for `sts:AssumeRole`), or a resource-based policy that names the external principal. 
+With a resource-based policy, the caller keeps its own identity and permissions; 
+with a role, it gives them up for the role's. 
+This matters for S3 object ownership and for services that need the caller's own permissions at the same time.
+
+- External ID: 
+A condition `sts:ExternalId` in the role trust policy. 
+Its purpose is the confused deputy problem when a third party (a SaaS vendor) assumes roles in many customer accounts. 
+It is not a secret password and not needed for your own accounts. 
+For AWS service principals, the equivalent protection is `aws:SourceArn` and `aws:SourceAccount` conditions.
+
+- Permissions boundaries: 
+A managed policy that caps an IAM user or role. 
+Classic use is delegated administration: 
+Developers may create roles only if they attach a specific boundary (`iam:PermissionsBoundary` condition), so they cannot escalate beyond it.
+
+- Session policies: 
+Passed on `AssumeRole` or `GetFederationToken`; they further restrict that one session. 
+Use them to vend scoped-down credentials (for example per-tenant) from a broader role without creating a role per tenant.
+
+- ABAC: 
+compare `aws:PrincipalTag/x` with `aws:ResourceTag/x` (or `aws:RequestTag` on create). 
+It scales with fewer policies, but you must protect the tags: deny `iam:TagRole`, resource tag changes, and require tags on create, or users can tag themselves into access.
 - Role chaining (assuming a role from a role session) caps the session at one hour, regardless of the role's maximum session duration. A scenario that needs a 4-hour chained session is a trap.
 - `aws:PrincipalOrgID` and `aws:PrincipalOrgPaths` in resource policies are the clean way to allow "any principal in our organization or OU" without listing account IDs.
 
+##### Note: 
+Attribute-Based Access Control (ABAC) in AWS is an authorization strategy that defines permissions based on attributes—which AWS implements as tags or session attributes.
+Instead of hardcoding individual user or resource ARNs into IAM policies, ABAC grants access dynamically when a principal's tag matches the target resource's tag.
+
 **Exam traps**
 
-- Using a permissions boundary or SCP to grant access. Neither grants; you still need an allow in an identity or resource policy.
-- Using an external ID between your own accounts and calling it the security control. Scenarios with internal accounts want `aws:PrincipalOrgID` or specific role ARNs.
-- ABAC without tag governance. The plausible option tags resources but lets the same users change tags.
-- Long-term access keys for a cross-account batch job. Use role assumption.
+- Using a permissions boundary or SCP to grant access. 
+Neither grants; you still need an allow in an identity or resource policy.
+
+- Using an external ID between your own accounts and calling it the security control. 
+Scenarios with internal accounts want `aws:PrincipalOrgID` or specific role ARNs.
+
+- ABAC without tag governance. 
+The plausible option tags resources but lets the same users change tags.
+
+- Long-term access keys for a cross-account batch job. 
+Use role assumption.
 
 **Hands-on**
 
-1. **Delegated role creation with a boundary.** In a test account, create a boundary policy that allows only S3 and CloudWatch Logs actions. Give a "developer" role `iam:CreateRole` and `iam:PutRolePolicy` with a condition that `iam:PermissionsBoundary` must equal that boundary ARN, and deny changing or deleting the boundary. As the developer, create a role with `AdministratorAccess` attached and the boundary set, then use the IAM policy simulator to show it can still only do S3 and Logs. *Cost/cleanup:* free. Delete the roles and policies.
-2. **ABAC across two projects.** Create a role with tag `project=blue` and a policy allowing `ec2:StartInstances` and `ec2:StopInstances` where `aws:ResourceTag/project` equals `${aws:PrincipalTag/project}`. Launch two `t3.micro` instances tagged `blue` and `green`, then try to stop each. Add a deny on `ec2:CreateTags` and `ec2:DeleteTags` for the `project` key and show the role cannot retag the green instance. *Cost/cleanup:* a few cents of EC2; terminate both instances.
+1. **Delegated role creation with a boundary.** 
+In a test account, create a boundary policy that allows only S3 and CloudWatch Logs actions. 
+Give a "developer" role `iam:CreateRole` and `iam:PutRolePolicy` with a condition that `iam:PermissionsBoundary` must equal that boundary ARN, and deny changing or deleting the boundary. 
+As the developer, create a role with `AdministratorAccess` attached and the boundary set, then use the IAM policy simulator to show it can still only do S3 and Logs. *Cost/cleanup:* free. Delete the roles and policies.
+
+2. **ABAC across two projects.** 
+Create a role with tag `project=blue` and a policy allowing `ec2:StartInstances` and `ec2:StopInstances` where `aws:ResourceTag/project` equals `${aws:PrincipalTag/project}`. 
+Launch two `t3.micro` instances tagged `blue` and `green`, then try to stop each. 
+Add a deny on `ec2:CreateTags` and `ec2:DeleteTags` for the `project` key and show the role cannot retag the green instance. 
+
+*Cost/cleanup:* a few cents of EC2; terminate both instances.
 
 ### Skill 2.1.4: Data perimeter controls and external access validation
 
 **Key concepts**
 
-- A data perimeter has three conditions: only trusted identities, accessing trusted resources, from expected networks. Implement with SCPs (identity side: which resources and networks your principals may use), RCPs (resource side: who may access your resources), and VPC endpoint policies (network side: what can pass through the endpoint).
-- Key condition keys: `aws:PrincipalOrgID`, `aws:ResourceOrgID`, `aws:SourceVpce`, `aws:SourceVpc`, `aws:SourceIp`, `aws:ViaAWSService`, `aws:PrincipalIsAWSService`. Perimeter deny statements need exceptions for AWS services acting on your behalf (`aws:PrincipalIsAWSService` or `aws:ViaAWSService`), or you break CloudTrail delivery, replication and similar flows.
-- Resource control policies are an AWS Organizations policy type applied to resources in member accounts. They cap the maximum permissions on those resources for any caller, including principals outside the organization. They do not grant permissions, do not apply to resources in the management account, do not affect service-linked roles, and do not apply to AWS managed KMS keys. Supported services include Amazon S3, AWS STS, AWS KMS, Amazon SQS, AWS Secrets Manager, Amazon DynamoDB, Amazon ECR, Amazon CloudWatch Logs, Amazon Cognito, Amazon OpenSearch Serverless and others. EC2, RDS and Lambda are not on the list, so a design that relies on an RCP to protect an RDS snapshot or Lambda function does not work.
-- VPC endpoint policies: an S3 gateway endpoint policy that allows only buckets in your organization (`aws:ResourceOrgID`) stops data exfiltration to an attacker's bucket from inside the VPC. Pair it with a bucket policy that denies access not from your endpoint (`aws:SourceVpce`).
-- IAM Access Analyzer has three analyzer types. External access analyzers (free) find resource policies that grant access outside your zone of trust (account or organization) for resources such as S3 buckets, IAM role trust policies, KMS keys, Lambda functions, SQS queues, Secrets Manager secrets, SNS topics, EBS and RDS snapshots, ECR repositories, EFS file systems and DynamoDB tables and streams. Internal access analyzers (paid per resource monitored) find which principals inside the organization or account can reach selected critical resources; they cover a smaller set (S3 buckets, S3 directory buckets, RDS DB and cluster snapshots, DynamoDB tables and streams). Unused access analyzers (paid per role and user analyzed) find unused roles, unused access keys and passwords, and unused service-level and action-level permissions.
-- Access Analyzer also validates policies: policy validation (grammar and best-practice warnings), and custom policy checks (`CheckNoNewAccess`, `CheckAccessNotGranted`, `CheckNoPublicAccess`) that you can run in a CI/CD pipeline to block changes before deployment. It can also generate a least-privilege policy from CloudTrail activity.
-- AWS Verified Access provides VPN-less, zero trust access to internal applications. Each request is evaluated against Cedar policies using user identity from a trust provider (IAM Identity Center or any OIDC IdP) and device posture from a device trust provider (Jamf, CrowdStrike, JumpCloud). It supports HTTP(S) applications and, since early 2025, TCP-based access such as SSH, RDP and databases. Endpoint types include load balancer, network interface, network CIDR and RDS. Non-HTTP access needs the Verified Access connectivity client on the user's device.
+- A data perimeter has three conditions: 
+only trusted identities, 
+accessing trusted resources, from expected networks. 
+Implement with SCPs (identity side: which resources and networks your principals may use), 
+RCPs (resource side: who may access your resources), and 
+VPC endpoint policies (network side: what can pass through the endpoint).
+
+- Key condition keys: 
+`aws:PrincipalOrgID`, 
+`aws:ResourceOrgID`, 
+`aws:SourceVpce`, 
+`aws:SourceVpc`, 
+`aws:SourceIp`, 
+`aws:ViaAWSService`, 
+`aws:PrincipalIsAWSService`. 
+Perimeter deny statements need exceptions for AWS services acting on your behalf 
+(`aws:PrincipalIsAWSService` or `aws:ViaAWSService`), or 
+you break CloudTrail delivery, replication and similar flows.
+
+- Resource control policies are an AWS Organizations policy type applied to resources in member accounts. 
+They cap the maximum permissions on those resources for any caller, including principals outside the organization. 
+They do not grant permissions, do not apply to resources in the management account, do not affect service-linked roles, and do not apply to AWS managed KMS keys. 
+Supported services include Amazon S3, AWS STS, AWS KMS, Amazon SQS, AWS Secrets Manager, Amazon DynamoDB, Amazon ECR, Amazon CloudWatch Logs, Amazon Cognito, Amazon OpenSearch Serverless and others. 
+EC2, RDS and Lambda are not on the list, so a design that relies on an RCP to protect an RDS snapshot or Lambda function does not work.
+
+- VPC endpoint policies: an S3 gateway endpoint policy that allows only buckets in your organization (`aws:ResourceOrgID`) stops data exfiltration to an attacker's bucket from inside the VPC. 
+Pair it with a bucket policy that denies access not from your endpoint (`aws:SourceVpce`).
+
+- IAM Access Analyzer has three analyzer types. 
+
+External access analyzers (free) find resource policies that grant access outside your zone of trust (account or organization) for resources such as S3 buckets, IAM role trust policies, KMS keys, Lambda functions, SQS queues, Secrets Manager secrets, SNS topics, EBS and RDS snapshots, ECR repositories, EFS file systems and DynamoDB tables and streams. 
+
+Internal access analyzers (paid per resource monitored) find which principals inside the organization or account can reach selected critical resources; they cover a smaller set (S3 buckets, S3 directory buckets, RDS DB and cluster snapshots, DynamoDB tables and streams). 
+
+Unused access analyzers (paid per role and user analyzed) find unused roles, unused access keys and passwords, and unused service-level and action-level permissions.
+
+- Access Analyzer also validates policies: 
+policy validation (grammar and best-practice warnings), and 
+custom policy checks (`CheckNoNewAccess`, `CheckAccessNotGranted`, `CheckNoPublicAccess`) that you can run in a CI/CD pipeline to block changes before deployment. 
+It can also generate a least-privilege policy from CloudTrail activity.
+
+- AWS Verified Access provides VPN-less, zero trust access to internal applications. 
+Each request is evaluated against Cedar policies using user identity from a trust provider (IAM Identity Center or any OIDC IdP) and device posture from a device trust provider (Jamf, CrowdStrike, JumpCloud). 
+It supports HTTP(S) applications and, since early 2025, TCP-based access such as SSH, RDP and databases. 
+Endpoint types include load balancer, network interface, network CIDR and RDS. 
+Non-HTTP access needs the Verified Access connectivity client on the user's device.
 
 **Exam traps**
 
-- Using an SCP to stop an external account from reading your bucket. SCPs only restrict principals in your organization. Restricting external callers on your resources is an RCP (or the resource policy itself).
+- Using an SCP to stop an external account from reading your bucket. 
+SCPs only restrict principals in your organization. 
+Restricting external callers on your resources is an RCP (or the resource policy itself).
+
 - Using an RCP to protect an EC2 or RDS resource type that RCPs do not support.
+
 - Expecting the management account to be protected by SCPs or RCPs. It is not; keep workloads out of it.
+
 - Choosing Client VPN plus security groups when the requirement is per-request authorization based on identity and device posture without network-level access. That is Verified Access.
+
 - Running an unused access analyzer to find public buckets. Public or cross-account exposure is the external access analyzer; unused access is about over-permissioned identities.
+
+##### Note: 
+
+In AWS Organizations, Service Control Policies (SCPs) and Resource Control Policies (RCPs) are both organization-level guardrails that do not grant permissions, but instead set maximum permission ceilings. 
+
+The core difference lies in who or what they target.'
+
+Service Control Policy (SCP) is Principal Centric while RCP is Resource-centric. 
+SCP restricts IAM users, roles, and accounts inside your organization while RCP restricts access to resources inside your organization.
+
+SCP does not block external principals if a resource policy allows them, but RCP Can block external principals (e.g., stopping anyone outside your Org ID from accessing an S3 bucket).
+
+SCP Generally does not apply to AWS service principals, but RCP Applies to service principals in certain cases. 
+
+SCP Service Support broadly applies across most AWS services, but RCP Service Support is limited to specific services supporting resource-based policies (44+ services).
+
+SCP was introduced in 2017 and RCP was introduced recently in 2024. 
+
 
 **Hands-on**
 
-1. **Access Analyzer findings and policy checks.** Create an account-level external access analyzer (free). Create an S3 bucket with a bucket policy granting `s3:GetObject` to a random other account ID and watch the finding appear; archive it with a rule, then remove the policy and see it resolve. Then run `aws accessanalyzer check-no-public-access` against a bucket policy JSON that allows `"Principal": "*"` and observe the FAIL result you would wire into a pipeline. *Cost/cleanup:* external analyzers are free; custom checks have a small per-call charge. Delete the bucket and analyzer.
-2. **Endpoint policy exfiltration block.** In a VPC with a private EC2 instance (use Session Manager over interface endpoints, or a temporary public IP), add an S3 gateway endpoint whose policy allows only buckets where `aws:ResourceOrgID` equals your organization ID (or, with one account, `aws:ResourceAccount` equals your account). From the instance, copy a file to your own bucket (works) and to a public bucket owned by someone else (denied). *Cost/cleanup:* gateway endpoints are free; interface endpoints for Session Manager bill per hour, so delete them and terminate the instance afterwards.
+1. **Access Analyzer findings and policy checks.** 
+Create an account-level external access analyzer (free). 
+Create an S3 bucket with a bucket policy granting `s3:GetObject` to a random other account ID and watch the finding appear; archive it with a rule, then remove the policy and see it resolve. 
+Then run `aws accessanalyzer check-no-public-access` against a bucket policy JSON that allows `"Principal": "*"` and observe the FAIL result you would wire into a pipeline. 
+*Cost/cleanup:* external analyzers are free; custom checks have a small per-call charge. 
+Delete the bucket and analyzer.
+
+2. **Endpoint policy exfiltration block.** 
+In a VPC with a private EC2 instance (use Session Manager over interface endpoints, or a temporary public IP), 
+add an S3 gateway endpoint whose policy allows only buckets 
+where `aws:ResourceOrgID` equals your organization ID (or, with one account, `aws:ResourceAccount` equals your account). From the instance, copy a file to your own bucket (works) and to a public bucket owned by someone else (denied). 
+*Cost/cleanup:* gateway endpoints are free; interface endpoints for Session Manager bill per hour, 
+so delete them and terminate the instance afterwards.
 
 ### Skill 2.1.5: Workload identities for hybrid and multi-cloud
 
 **Key concepts**
 
-- IAM Roles Anywhere lets workloads outside AWS (on-premises servers, other clouds, edge devices) get temporary AWS credentials using X.509 certificates instead of long-term access keys. Building blocks: a trust anchor (an AWS Private CA, or your own CA certificate bundle), a profile (which roles may be assumed, optional session policy and managed policies, session duration from 15 minutes to 12 hours), and the role's trust policy, which trusts `rolesanywhere.amazonaws.com` and can condition on certificate attributes (subject, issuer, SAN).
-- The workload uses the credential helper (`aws_signing_helper`) configured as a `credential_process` in the AWS CLI or SDK config. Private keys can stay in a TPM or PKCS#11 store.
-- Revocation: import a CRL into Roles Anywhere; it does not query OCSP. If the scenario requires revoking a compromised server quickly, the design must include a process to update the imported CRL, or disable the profile or trust anchor.
-- Decision rule for non-AWS workloads: workload already has an OIDC token from its platform (GitHub, GitLab, another cloud's workload identity, Kubernetes) use `AssumeRoleWithWebIdentity` with an IAM OIDC provider. Workload has, or can get, an X.509 certificate from an enterprise PKI, use Roles Anywhere. Workload is a managed server you want to patch and access, use Systems Manager hybrid activations (which also give the instance credentials for SSM).
+- IAM Roles Anywhere lets workloads outside AWS (on-premises servers, other clouds, edge devices) get temporary AWS credentials using X.509 certificates instead of long-term access keys. 
+Building blocks: 
+a trust anchor (an AWS Private CA, or your own CA certificate bundle), 
+a profile (which roles may be assumed, optional session policy and managed policies, session duration from 15 minutes to 12 hours), and 
+the role's trust policy, which trusts `rolesanywhere.amazonaws.com` and can condition on certificate attributes (subject, issuer, SAN).
+
+- The workload uses the credential helper (`aws_signing_helper`) configured as a `credential_process` in the AWS CLI or SDK config. 
+Private keys can stay in a TPM or PKCS#11 store.
+
+- Revocation: 
+Import a CRL into Roles Anywhere; it does not query OCSP. 
+If the scenario requires revoking a compromised server quickly, the design must include a process to update the imported CRL, or disable the profile or trust anchor.
+
+- Decision rule for non-AWS workloads: workload already has an OIDC token from its platform (GitHub, GitLab, another cloud's workload identity, Kubernetes) use `AssumeRoleWithWebIdentity` with an IAM OIDC provider. 
+Workload has, or can get, an X.509 certificate from an enterprise PKI, use Roles Anywhere. Workload is a managed server you want to patch and access, use Systems Manager hybrid activations (which also give the instance credentials for SSM).
+
 - IAM Roles Anywhere supports ML-DSA PKIs as trust anchors, which matters for post-quantum planning (see 2.2.4).
+
 - Roles Anywhere is in the list of services that RCPs support, so you can cap which trust anchors and profiles can be used across the organization.
 
 **Exam traps**
 
-- Creating an IAM user with access keys for an on-premises application and rotating keys with a script. It works, but fails "no long-term credentials."
+- Creating an IAM user with access keys for an on-premises application and rotating keys with a script. 
+It works, but fails "no long-term credentials."
+
 - Picking AWS Private CA as mandatory. You can use an existing enterprise CA as the trust anchor; Private CA is optional and has a monthly charge.
+
 - Using IAM Roles Anywhere for human users. It is for workloads; humans use Identity Center.
+
 - Assuming certificate revocation works through OCSP automatically.
 
 **Hands-on**
 
-1. **Roles Anywhere with a self-made CA.** Use OpenSSL on your laptop to create a root CA and a client certificate with the correct key usage. Create a Roles Anywhere trust anchor from the CA certificate, a role trusting `rolesanywhere.amazonaws.com` with a condition on the certificate subject CN, and a profile that references the role with a one-hour session. Configure `credential_process` with `aws_signing_helper` and run `aws s3 ls`. *Cost/cleanup:* Roles Anywhere has no charge when you bring your own CA. Delete the profile, trust anchor and role.
-2. **Revocation test.** Issue a second client certificate, generate a CRL that revokes it, and import the CRL with `aws rolesanywhere import-crl`. Confirm the revoked certificate fails `CreateSession` while the first still works. This shows the CRL is a static import you must refresh. *Cost/cleanup:* free. Delete the CRL and certificates.
+1. **Roles Anywhere with a self-made CA.** 
+
+Use OpenSSL on your laptop to create a root CA and a client certificate with the correct key usage. 
+
+Create a Roles Anywhere trust anchor from the CA certificate, a role trusting `rolesanywhere.amazonaws.com` with a condition on the certificate subject CN, and a profile that references the role with a one-hour session. 
+
+Configure `credential_process` with `aws_signing_helper` and run `aws s3 ls`. 
+
+*Cost/cleanup:* Roles Anywhere has no charge when you bring your own CA. 
+Delete the profile, trust anchor and role.
+
+2. **Revocation test.** 
+Issue a second client certificate, generate a CRL that revokes it, and 
+import the CRL with `aws rolesanywhere import-crl`. 
+Confirm the revoked certificate fails `CreateSession` while the first still works. 
+This shows the CRL is a static import you must refresh. 
+*Cost/cleanup:* free. Delete the CRL and certificates.
 
 ### Practice questions: Task 2.1
 
-**Question 2.1.1** A bank has 140 AWS accounts in AWS Organizations and uses Microsoft Entra ID as its workforce IdP. Today each account has an IAM SAML identity provider and hand-built roles, and joiners often wait two days for access because an administrator must create matching groups. Leavers sometimes keep access until the next manual review. The security team wants one place to define access per job function, automatic onboarding and offboarding based on Entra ID group membership, and the least operational overhead. Which solution meets these requirements?
+**Question 2.1.1** 
+A bank has 140 AWS accounts in AWS Organizations and uses Microsoft Entra ID as its workforce IdP. 
+Today each account has an IAM SAML identity provider and hand-built roles, and joiners often wait two days for access because an administrator must create matching groups. 
+Leavers sometimes keep access until the next manual review. 
+The security team wants one place to define access per job function, automatic onboarding and 
+offboarding based on Entra ID group membership, and the least operational overhead. 
+Which solution meets these requirements?
 
-- A. Keep the per-account IAM SAML providers, deploy the roles with CloudFormation StackSets, and map Entra ID groups to roles through SAML attribute assertions.
+- A. Keep the per-account IAM SAML providers, deploy the roles with CloudFormation StackSets, and 
+map Entra ID groups to roles through SAML attribute assertions.
+
 - B. Enable IAM Identity Center with an organization instance, connect Entra ID over SAML 2.0, enable SCIM provisioning, and assign permission sets to synced groups.
+
 - C. Enable IAM Identity Center with Entra ID over SAML 2.0, create users and groups in the Identity Center directory, and run a nightly Lambda function that compares them with Entra ID.
+
 - D. Create an Amazon Cognito user pool federated with Entra ID over OIDC, and use an identity pool with role mapping rules to issue credentials for each account.
 
 <details>
@@ -144,23 +363,47 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Correct answer: B**
 
-**Why B is correct:** IAM Identity Center gives one place to define permission sets and assign them to groups across all accounts in the organization. SAML 2.0 handles sign-in with Entra ID, and SCIM pushes user and group membership changes automatically. Removing someone from the Entra ID group removes the assignment without any manual work. This is the managed path with the least ongoing effort.
+**Why B is correct:** 
+IAM Identity Center gives one place to define permission sets and assign them to groups across all accounts in the organization. 
+SAML 2.0 handles sign-in with Entra ID, and SCIM pushes user and group membership changes automatically. 
+Removing someone from the Entra ID group removes the assignment without any manual work. 
+This is the managed path with the least ongoing effort.
 
 **Why the other options are incorrect:**
 
-- **A:** StackSets reduce role drift, but every account still needs its own provider and roles. Joiners and leavers still depend on group-to-role mapping in each account, and there is no central assignment view. It is more overhead than Identity Center.
-- **C:** SAML works, but the custom Lambda sync is code you must build and maintain, and nightly runs leave a gap for leavers. SCIM is the managed protocol that removes this.
-- **D:** Cognito is for application end users. It is not designed for workforce access to AWS accounts and the console across an organization, and identity pool roles per account would be heavy to manage.
+- **A:** 
+StackSets reduce role drift, but every account still needs its own provider and roles. Joiners and leavers still depend on group-to-role mapping in each account, and there is no central assignment view. 
+It is more overhead than Identity Center.
 
-**Key takeaway:** SAML signs people in; SCIM keeps users and groups current. Workforce access to many accounts means Identity Center with both.
+- **C:** 
+SAML works, but the custom Lambda sync is code you must build and maintain, and 
+nightly runs leave a gap for leavers. SCIM is the managed protocol that removes this.
+
+- **D:** 
+Cognito is for application end users. 
+It is not designed for workforce access to AWS accounts and the console across an organization, and 
+Identity pool roles per account would be heavy to manage.
+
+**Key takeaway:** 
+SAML signs people in; SCIM keeps users and groups current. 
+Workforce access to many accounts means Identity Center with both.
 
 </details>
 
-**Question 2.1.2** A payments company runs microservices on Amazon EKS. One cluster has Linux managed node groups; a second cluster runs a batch namespace on AWS Fargate. Each service must have its own AWS permissions, and the platform team wants to stop maintaining a separate IAM OIDC provider and trust policy edit for every new cluster. Pods must not be able to use the node's instance profile. Which solution meets these requirements?
+**Question 2.1.2** 
+A payments company runs microservices on Amazon EKS. 
+One cluster has Linux managed node groups; 
+a second cluster runs a batch namespace on AWS Fargate. 
+Each service must have its own AWS permissions, and 
+the platform team wants to stop maintaining a separate IAM OIDC provider and trust policy edit for every new cluster. Pods must not be able to use the node's instance profile. 
+Which solution meets these requirements?
 
 - A. Use EKS Pod Identity for every workload in both clusters and block pod access to IMDS on all nodes.
+
 - B. Use IRSA for every workload in both clusters and create one IAM role per service per cluster with the cluster's OIDC provider in the trust policy.
+
 - C. Attach a node IAM role per node group with only the permissions needed by the pods scheduled there, and use taints to place each service on its own node group.
+
 - D. Use EKS Pod Identity for workloads on the Linux managed node groups, use IRSA for the Fargate workloads, and block pod access to IMDS on the EC2 nodes.
 
 <details>
@@ -168,19 +411,37 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Correct answer: D**
 
-**Why D is correct:** EKS Pod Identity uses a single service principal, so one role can be reused across clusters without adding OIDC providers or editing trust policies per cluster. It runs through the Pod Identity Agent on Linux EC2 nodes. It is not supported on Fargate, so the Fargate namespace needs IRSA. Blocking IMDS on EC2 nodes stops pods from falling back to the node role.
+**Why D is correct:** 
+EKS Pod Identity uses a single service principal, so one role can be reused across clusters without adding OIDC providers or editing trust policies per cluster. 
+It runs through the Pod Identity Agent on Linux EC2 nodes. 
+It is not supported on Fargate, so the Fargate namespace needs IRSA. 
+Blocking IMDS on EC2 nodes stops pods from falling back to the node role.
 
 **Why the other options are incorrect:**
 
-- **A:** Pod Identity is not supported on Fargate, so the batch namespace would have no credentials.
-- **B:** IRSA works everywhere but keeps the per-cluster OIDC provider and trust policy maintenance the team wants to remove.
-- **C:** Node roles give every pod on the node the same permissions. Taints help placement but are not an identity boundary, and this multiplies node groups.
+- **A:** 
+Pod Identity is not supported on Fargate, so the batch namespace would have no credentials.
 
-**Key takeaway:** Pod Identity for Linux EC2 nodes; IRSA is still required on Fargate, Windows, Outposts and EKS Anywhere.
+- **B:** 
+IRSA works everywhere but keeps the per-cluster OIDC provider and trust policy maintenance the team wants to remove.
+
+- **C:** Node roles give every pod on the node the same permissions. 
+Taints help placement but are not an identity boundary, and this multiplies node groups.
+
+**Key takeaway:** 
+Pod Identity for Linux EC2 nodes; IRSA is still required on Fargate, Windows, Outposts and EKS Anywhere.
+
+**Note:**
+IRSA stands for IAM Roles for Service Accounts, an Amazon EKS feature that lets individual Kubernetes Pods assume specific AWS IAM roles.
 
 </details>
 
-**Question 2.1.3** A fintech SaaS provider needs read access to an S3 bucket and a CloudWatch Logs group in each of 300 customer AWS accounts. Customers create a role from a template the provider publishes. The provider's platform assumes those roles from a single role in its own account. The provider's security review highlights that a malicious customer could enter another customer's role ARN in the onboarding portal. The provider also wants the role sessions to be limited to read-only actions even if a customer over-grants the role. Which actions should the provider take? (Select TWO.)
+**Question 2.1.3** 
+A fintech SaaS provider needs read access to an S3 bucket and a CloudWatch Logs group in each of 300 customer AWS accounts. 
+Customers create a role from a template the provider publishes. 
+The provider's platform assumes those roles from a single role in its own account. 
+The provider's security review highlights that a malicious customer could enter another customer's role ARN in the onboarding portal. 
+The provider also wants the role sessions to be limited to read-only actions even if a customer over-grants the role. Which actions should the provider take? (Select TWO.)
 
 - A. Generate a unique external ID per customer, store it with the customer record, require it in the template's trust policy, and always pass it on `sts:AssumeRole`.
 - B. Add `aws:PrincipalOrgID` to the customer role trust policies so only principals in the provider's organization can assume them.
@@ -193,7 +454,9 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Correct answer: A, C**
 
-**Why A and C are correct:** The confused deputy risk is that the provider's own role can be tricked into assuming a different customer's role. A per-customer external ID that the provider generates and always sends means a customer cannot make the provider assume someone else's role, because that role expects a different ID. A session policy on `AssumeRole` intersects with the role's permissions, so even an over-granted customer role yields only the read actions the provider passes.
+**Why A and C are correct:** 
+The confused deputy risk is that the provider's own role can be tricked into assuming a different customer's role. 
+A per-customer external ID that the provider generates and always sends means a customer cannot make the provider assume someone else's role, because that role expects a different ID. A session policy on `AssumeRole` intersects with the role's permissions, so even an over-granted customer role yields only the read actions the provider passes.
 
 **Why the other options are incorrect:**
 
@@ -205,7 +468,11 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 </details>
 
-**Question 2.1.4** A lender's organization has a workload OU containing accounts that store customer documents in S3 buckets, secrets in AWS Secrets Manager, and keys in AWS KMS. Auditors require a preventive control so that no principal outside the organization can access these resources, even if a developer writes an overly permissive bucket or key policy. The control must cover future accounts in the OU automatically and must not break AWS services that write logs into those buckets. Which solution meets these requirements?
+**Question 2.1.4** 
+A lender's organization has a workload OU containing accounts that store customer documents in S3 buckets, secrets in AWS Secrets Manager, and keys in AWS KMS. 
+Auditors require a preventive control so that no principal outside the organization can access these resources, even if a developer writes an overly permissive bucket or key policy. 
+The control must cover future accounts in the OU automatically and must not break AWS services that write logs into those buckets. 
+Which solution meets these requirements ?
 
 - A. Attach an SCP to the workload OU that denies all S3, Secrets Manager and KMS actions when `aws:PrincipalOrgID` does not equal the organization ID.
 - B. Enable an organization-wide IAM Access Analyzer external access analyzer and use an EventBridge rule to invoke a Lambda function that removes any statement granting external access.
@@ -217,7 +484,10 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Correct answer: C**
 
-**Why C is correct:** RCPs set the maximum permissions on resources in member accounts for every caller, including principals outside the organization. S3, Secrets Manager and KMS all support RCPs. Attaching to the OU covers new accounts through inheritance. The `aws:PrincipalIsAWSService` exception keeps AWS service principals, such as log delivery, working.
+**Why C is correct:** 
+RCPs set the maximum permissions on resources in member accounts for every caller, including principals outside the organization. S3, Secrets Manager and KMS all support RCPs. 
+Attaching to the OU covers new accounts through inheritance. 
+The `aws:PrincipalIsAWSService` exception keeps AWS service principals, such as log delivery, working.
 
 **Why the other options are incorrect:**
 
@@ -225,11 +495,18 @@ This task tests whether you can pick the right identity mechanism for each kind 
 - **B:** This is detective with automated cleanup. There is a window of exposure between the policy change and the Lambda fix, so it is not preventive.
 - **D:** Config rules are detective and the remediation runs after the fact. They also do not cover all external-access cases such as cross-account grants to a specific foreign account.
 
-**Key takeaway:** SCPs bound your principals; RCPs bound your resources against everyone. Add the AWS service exception.
+**Key takeaway:** 
+SCPs bound your principals; 
+RCPs bound your resources against everyone. 
+Add the AWS service exception.
 
 </details>
 
-**Question 2.1.5** An insurer runs a claims-scoring application on servers in its own data center and on virtual machines in another cloud provider. The application reads from an Amazon S3 bucket and writes to an Amazon SQS queue. The company already runs an enterprise PKI that issues X.509 certificates to every server, with private keys held in TPMs. Security policy bans long-term AWS access keys. Operations wants to be able to cut off a single compromised server. Which solution meets these requirements?
+**Question 2.1.5** 
+An insurer runs a claims-scoring application on servers in its own data center and on virtual machines in another cloud provider. The application reads from an Amazon S3 bucket and writes to an Amazon SQS queue. 
+The company already runs an enterprise PKI that issues X.509 certificates to every server, with private keys held in TPMs. 
+Security policy bans long-term AWS access keys. 
+Operations wants to be able to cut off a single compromised server. Which solution meets these requirements?
 
 - A. Configure IAM Roles Anywhere with the enterprise CA as a trust anchor, a profile that maps to a scoped IAM role, the credential helper on each server, and a process that imports updated CRLs.
 - B. Register each server with AWS Systems Manager using hybrid activations and grant the activation's IAM service role permission to read S3 and write to SQS for the application.
@@ -241,7 +518,10 @@ This task tests whether you can pick the right identity mechanism for each kind 
 
 **Correct answer: A**
 
-**Why A is correct:** Roles Anywhere exchanges the existing X.509 certificate for temporary credentials, so there are no long-term keys. The enterprise CA can be the trust anchor without buying Private CA, and the credential helper works with keys held in TPM or PKCS#11 stores. Importing an updated CRL revokes a single server's certificate.
+**Why A is correct:** 
+Roles Anywhere exchanges the existing X.509 certificate for temporary credentials, so there are no long-term keys. 
+The enterprise CA can be the trust anchor without buying Private CA, and the credential helper works with keys held in TPM or PKCS#11 stores. 
+Importing an updated CRL revokes a single server's certificate.
 
 **Why the other options are incorrect:**
 
@@ -249,46 +529,73 @@ This task tests whether you can pick the right identity mechanism for each kind 
 - **C:** `AssumeRoleWithWebIdentity` takes a signed OIDC token from an OIDC issuer, not an X.509 certificate. A PKI is not an OIDC provider.
 - **D:** This builds a custom proxy and replaces the existing PKI. It adds latency and operational work and still needs the proxy to hold AWS permissions.
 
-**Key takeaway:** Certificates outside AWS map to IAM Roles Anywhere; OIDC tokens map to web identity federation.
+**Key takeaway:** 
+Certificates outside AWS map to IAM Roles Anywhere; 
+OIDC tokens map to web identity federation.
 
 </details>
 
 ## Task 2.2: Design solutions to implement encryption and key management strategies
 
-This task tests whether you can match a key custody requirement to the right AWS option (AWS owned key, AWS managed key, customer managed key, imported material, CloudHSM-backed custom key store, external key store) and handle certificates for TLS without manual renewals. The recurring decision: who must control the key material, and what is the least operational way to prove it.
+This task tests whether you can match a key custody requirement to the right AWS option (AWS owned key, AWS managed key, customer managed key, imported material, CloudHSM-backed custom key store, external key store) and handle certificates for TLS without manual renewals. 
+The recurring decision: who must control the key material, and what is the least operational way to prove it.
 
 ### Skill 2.2.1: Encryption at rest with customer managed keys and automatic rotation
 
 **Key concepts**
 
 - Key types by control: AWS owned keys (no visibility, no key policy), AWS managed keys (`aws/s3`, `aws/ebs`; visible in your account, AWS rotates them every year, you cannot change their policy or share them cross-account), customer managed keys (you own the key policy, grants, rotation, deletion and cross-account use). Any requirement for cross-account access, a custom key policy, auditing who used a specific key, or a custom rotation period means a customer managed key.
+
 - Automatic rotation for customer managed keys: only for symmetric encryption keys whose material AWS KMS generated. The rotation period is configurable from 90 to 2,560 days (default 365). On-demand rotation (`RotateKeyOnDemand`) is also available, up to 25 times per key, and does not change the automatic schedule. Rotation keeps the same key ID and ARN and keeps old material to decrypt old ciphertext, so no re-encryption is needed.
+
 - Not supported for automatic rotation: asymmetric keys, HMAC keys, keys with imported material, and keys in custom key stores. For these, rotate manually by creating a new key and moving an alias. For imported material, on-demand rotation works after you import new material in the pending-rotation state.
+
 - Key policy is the root of trust. If the key policy does not allow the account (the default `arn:aws:iam::<acct>:root` statement), IAM policies alone cannot grant access. Cross-account use needs both the key policy in the owning account and an IAM policy in the caller's account.
+
 - `kms:ViaService` limits a key to use through specific services (for example only S3 in one Region). `kms:EncryptionContext` conditions bind usage to context values, which helps tenant isolation.
+
 - Grants give temporary, programmatic permissions, used by services such as EBS and RDS on your behalf. They are the answer when a service needs to use a key for a resource's lifetime without a policy edit.
+
 - Multi-Region keys share key material and key ID across Regions, so you can decrypt in another Region without a call back to the source Region. Use them for DynamoDB global tables client-side encryption, cross-Region backups and DR. They are not required for S3 replication of SSE-KMS objects (S3 re-encrypts with a key in the destination Region).
+
 - S3 Bucket Keys reduce KMS request volume and cost for SSE-KMS by caching a bucket-level data key. A scenario that complains about KMS throttling or KMS request costs on a busy bucket points here.
+
 - Key deletion has a waiting period of 7 to 30 days. Deleting a key makes data unrecoverable; disabling is reversible. A preventive control is an SCP that denies `kms:ScheduleKeyDeletion` except for a break-glass role.
 
 **Exam traps**
 
 - "Enable automatic rotation on the imported-material key." Not supported; use manual or on-demand rotation after importing new material.
+
 - Choosing an AWS managed key when another account must decrypt. AWS managed key policies cannot be edited, so cross-account sharing (for example of an encrypted RDS snapshot or AMI) fails.
+
 - Re-encrypting all data after a rotation. Not needed; KMS keeps prior versions.
+
 - Assuming a rotation period shorter than 90 days is possible with automatic rotation.
 
 **Hands-on**
 
-1. **Custom rotation period.** Create a symmetric customer managed key, then run `aws kms enable-key-rotation --rotation-period-in-days 180` and `aws kms get-key-rotation-status` to see the next rotation date. Run `aws kms rotate-key-on-demand` and then `aws kms list-key-rotations` to see the new material entry. Encrypt a string before and after rotation and decrypt both with the same key ID. *Cost/cleanup:* a customer managed key has a monthly charge, and rotated material versions can add to it; schedule deletion with the 7-day minimum.
-2. **Cross-account snapshot sharing.** Create an encrypted EBS snapshot with an AWS managed key and try to share it with a second account; observe it cannot be used there. Copy the snapshot re-encrypting with a customer managed key, add the second account to the key policy, share again, and copy it in the second account. *Cost/cleanup:* a 1 GiB volume and snapshot cost cents; delete snapshots, volumes and schedule key deletion.
+1. **Custom rotation period.** 
+Create a symmetric customer managed key, then run `aws kms enable-key-rotation --rotation-period-in-days 180` and `aws kms get-key-rotation-status` to see the next rotation date. 
+Run `aws kms rotate-key-on-demand` and then `aws kms list-key-rotations` to see the new material entry. 
+Encrypt a string before and after rotation and decrypt both with the same key ID. 
+*Cost/cleanup:* a customer managed key has a monthly charge, and rotated material versions can add to it; schedule deletion with the 7-day minimum.
+
+2. **Cross-account snapshot sharing.** 
+Create an encrypted EBS snapshot with an AWS managed key and try to share it with a second account; observe it cannot be used there. 
+Copy the snapshot re-encrypting with a customer managed key, add the second account to the key policy, share again, and copy it in the second account. 
+*Cost/cleanup:* a 1 GiB volume and snapshot cost cents; delete snapshots, volumes and schedule key deletion.
 
 ### Skill 2.2.2: Encryption in transit with certificate management
 
 **Key concepts**
 
-- Standard (non-exportable) ACM public certificates are free when used with integrated services such as ELB, CloudFront and API Gateway, and ACM renews them automatically when DNS validation stays in place. DNS validation is the answer for "no manual renewal"; email validation needs a person to click.
-- Classic ACM public certificates cannot be exported. Since mid-2025, ACM can issue exportable public certificates if you choose the export option at request time. You get the private key to install on EC2, containers or on-premises. These carry a per-certificate charge and certificates issued before that launch cannot be exported. If a scenario needs a public certificate on an EC2 web server or an on-premises appliance with AWS managing issuance, exportable ACM certificates are now a valid answer.
+- Standard (non-exportable) ACM public certificates are free when used with integrated services such as ELB, CloudFront and API Gateway, and ACM renews them automatically when DNS validation stays in place. 
+DNS validation is the answer for "no manual renewal"; email validation needs a person to click.
+
+- Classic ACM public certificates cannot be exported. Since mid-2025, ACM can issue exportable public certificates if you choose the export option at request time. You get the private key to install on EC2, containers or on-premises. 
+These carry a per-certificate charge and certificates issued before that launch cannot be exported. 
+If a scenario needs a public certificate on an EC2 web server or an on-premises appliance with AWS managing issuance, exportable ACM certificates are now a valid answer.
+
 - CloudFront requires its ACM certificate in us-east-1. Regional services (ALB, API Gateway Regional endpoints) need the certificate in their own Region.
 - TLS 1.3: choose an ELB security policy that includes TLS 1.3, and on CloudFront pick a security policy that sets the minimum protocol. For end-to-end encryption, ALB re-encrypts to targets over HTTPS; targets can use self-signed or Private CA certificates because ALB does not validate target certificates. NLB can pass TLS through (TCP listener) when the target must terminate TLS, for example for mutual TLS or a fixed certificate.
 - Mutual TLS: ALB supports mTLS in verify mode with a trust store (CA bundle and optional CRLs) or passthrough mode. API Gateway custom domains support mTLS with a trust store in S3.
